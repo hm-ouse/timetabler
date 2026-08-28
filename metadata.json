@@ -1,0 +1,8 @@
+{
+  "name": "Festival Timetable Planner",
+  "description": "Custom festival timetable builder that matches user band ratings from Google Sheets with festival lineups from Clashfinder or web scraping, generating interactive timetables, elapsed set dimming, and calendar exports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
