@@ -58,7 +58,7 @@ export function generateIcsCalendar(
   const lines: string[] = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Festival Timetable Planner//EN',
+    'PRODID:-//timetabler//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${festival.name} - My Timetable`,
@@ -100,7 +100,7 @@ export function generateIcsCalendar(
       ? `Rating: ${item.normalizedScore}% (${item.rating.rawScore} ${item.rating.detectedScale})\nReview Summary: ${item.rating.reviewSummary || 'N/A'}\n${item.rating.genre ? `Genre: ${item.rating.genre}\n` : ''}`
       : 'User Rating: Unrated';
 
-    const description = `${ratingNote}\nStage: ${item.set.stage}\nFestival: ${festival.name}\n${item.set.description ? `Set Details: ${item.set.description}\n` : ''}\nCreated with Festival Timetable Planner`;
+    const description = `${ratingNote}\nStage: ${item.set.stage}\nFestival: ${festival.name}\n${item.set.description ? `Set Details: ${item.set.description}\n` : ''}\nCreated with timetabler`;
 
     // Escape iCal special characters
     const cleanSummary = `${item.set.artist} @ ${item.set.stage} [${item.normalizedScore}%]`

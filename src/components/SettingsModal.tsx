@@ -102,7 +102,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `festsync_backup_${new Date().toISOString().split('T')[0]}.json`;
+      link.download = `timetabler_backup_${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -393,7 +393,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-[#262137] bg-[#110f1a] flex items-center justify-between text-xs text-[#7c768e]">
-          <span>FestSync Client v2.5 • Offline Ready</span>
+          <span>timetabler Client • Offline Ready</span>
           <button
             type="button"
             onClick={onClose}

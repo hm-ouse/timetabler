@@ -34,7 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-base sm:text-xl font-bold tracking-tight text-white flex items-center truncate">
-                FestSync
+                timetabler
                 <span className="text-emerald-300 text-[10px] font-bold ml-2 px-2 py-0.5 bg-emerald-500/15 rounded-full border border-emerald-500/30 shrink-0">
                   Festival Planner
                 </span>

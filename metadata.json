@@ -1,5 +1,5 @@
 {
-  "name": "Festival Timetable Planner",
+  "name": "timetabler",
   "description": "Custom festival timetable builder that matches user band ratings from Google Sheets with festival lineups from pasted spreadsheets or timetable CSV files, generating interactive timetables, clash analysis, elapsed set dimming, and calendar exports.",
   "requestFramePermissions": [],
   "majorCapabilities": [

@@ -503,7 +503,7 @@ export function exportAllDataJson(): string {
   const filterSettings = loadStoredFilterSettings();
 
   const payload = {
-    app: 'FestSync',
+    app: 'timetabler',
     version: CURRENT_STORAGE_VERSION,
     exportedAt: new Date().toISOString(),
     festival: fest,
