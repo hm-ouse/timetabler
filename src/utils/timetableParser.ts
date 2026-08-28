@@ -179,20 +179,25 @@ export function timeToMinutes(timeStr: string, dayStartHour: number = 6): number
 /**
  * Helper to test if a string looks like a date/time
  */
-function isDateTimeCell(cellStr: string): boolean {
+export function isDateTimeCell(cellStr: string): boolean {
   if (!cellStr) return false;
   const s = cellStr.trim();
   // Matches "20/08/2026 11:00", "2026-08-20 11:00", "20/08/2026", "11:00", "2:30 PM", "23:30"
   if (/^\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}(\s+\d{1,2}[:.]\d{2})?/.test(s)) return true;
   if (/^\d{4}[/\-.]\d{1,2}[/\-.]\d{1,2}/.test(s)) return true;
   if (/^\d{1,2}[:.]\d{2}(\s*(am|pm))?$/i.test(s)) return true;
+  if (/^\d{1,2}[:.]\d{2}\s*[-–—]\s*\d{1,2}[:.]\d{2}/i.test(s)) return true;
   return false;
 }
 
 /**
- * Parse Clashfinder or standard festival CSV
+ * Parse standard festival CSV / TSV spreadsheet data or timetable exports
  */
-export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 'Festival Lineup'): FestivalData {
+export function parseFestivalCsv(
+  csvText: string,
+  festivalNameHint: string = 'Festival Lineup',
+  sourceType: 'paste_csv' | 'upload' | 'preset' = 'paste_csv'
+): FestivalData {
   const cleanInput = csvText.trim();
   const parsed = Papa.parse<any[]>(cleanInput, {
     header: false,
@@ -205,7 +210,7 @@ export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 
       days: [],
       stages: [],
       sets: [],
-      sourceType: 'clashfinder',
+      sourceType,
     };
   }
 
@@ -213,18 +218,26 @@ export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 
   let headerRowIndex = -1;
   let headers: string[] = [];
 
-  // Check if first row is a header
+  // Check if first row is a header (must not contain time cells, and must match known header keywords)
   const firstRow = rawRows[0].map((c: any) => String(c || '').trim());
-  const firstRowJoined = firstRow.join(' ').toLowerCase();
+  const hasTimeCellInFirstRow = firstRow.some((cell) => isDateTimeCell(cell));
 
-  if (
-    firstRowJoined.includes('venue') ||
-    firstRowJoined.includes('stage') ||
-    firstRowJoined.includes('act') ||
-    firstRowJoined.includes('artist') ||
-    firstRowJoined.includes('start') ||
-    firstRowJoined.includes('end')
-  ) {
+  const knownHeaderWords = new Set([
+    'venue', 'stage', 'stages', 'act', 'acts', 'artist', 'artists',
+    'band', 'bands', 'performer', 'performers', 'start', 'starts',
+    'start time', 'end', 'ends', 'end time', 'time', 'times',
+    'day', 'days', 'date', 'dates', 'notes', 'comments', 'comment', 'slot', 'location'
+  ]);
+
+  const headerMatches = firstRow.filter((cell) => {
+    const l = cell.toLowerCase().trim();
+    if (knownHeaderWords.has(l)) return true;
+    return ['venue', 'stage', 'artist', 'act', 'band', 'start', 'end', 'time', 'day', 'date'].some(
+      (kw) => l === kw || l.startsWith(kw + ' ') || l.endsWith(' ' + kw)
+    );
+  });
+
+  if (!hasTimeCellInFirstRow && headerMatches.length >= 1) {
     headerRowIndex = 0;
     headers = firstRow;
   }
@@ -242,25 +255,35 @@ export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 
   if (headers.length > 0) {
     headers.forEach((h, idx) => {
       const l = h.toLowerCase().trim();
-      if (startCol === -1 && (l === 'start' || l.includes('start') || l.includes('from') || l === 'on')) {
+      if (startCol === -1 && (l === 'start' || l.startsWith('start') || l.includes('start time') || l === 'from' || l === 'on')) {
         startCol = idx;
-      } else if (endCol === -1 && (l === 'end' || l.includes('end') || l.includes('finish') || l.includes('to') || l === 'off')) {
+      } else if (endCol === -1 && (l === 'end' || l.startsWith('end') || l.includes('end time') || l.includes('finish') || l.includes('to') || l === 'off')) {
         endCol = idx;
-      } else if (artistCol === -1 && (l === 'act' || l === 'artist' || l.includes('band') || l.includes('artist') || l === 'name' || l.includes('performer'))) {
+      } else if (artistCol === -1 && (l === 'act' || l === 'artist' || l.includes('band') || l.includes('artist') || l === 'name' || l.includes('performer') || l.includes('lineup') || l.includes('who'))) {
         artistCol = idx;
-      } else if (stageCol === -1 && (l === 'venue' || l === 'stage' || l.includes('stage') || l.includes('venue') || l.includes('location') || l.includes('tent'))) {
+      } else if (stageCol === -1 && (l === 'venue' || l === 'stage' || l.includes('stage') || l.includes('venue') || l.includes('location') || l.includes('tent') || l.includes('room') || l.includes('arena'))) {
         stageCol = idx;
       } else if (dayCol === -1 && (l === 'day' || l.includes('day') || l === 'date' || l.includes('date'))) {
         dayCol = idx;
-      } else if (notesCol === -1 && (l.includes('comment') || l.includes('note') || l.includes('desc') || l.includes('summary'))) {
+      } else if (notesCol === -1 && (l.includes('comment') || l.includes('note') || l.includes('desc') || l.includes('summary') || l.includes('info') || l.includes('genre'))) {
         notesCol = idx;
       }
     });
+
+    // If still missing startCol, look for generic "time" column
+    if (startCol === -1) {
+      headers.forEach((h, idx) => {
+        const l = h.toLowerCase().trim();
+        if (startCol === -1 && (l === 'time' || l === 'times' || l.includes('time') || l.includes('hours') || l.includes('slot'))) {
+          startCol = idx;
+        }
+      });
+    }
   }
 
-  // Clashfinder standard default ordering if headers not matched or partially matched:
-  // Clashfinder standard download CSV: Venue, Act, Start, End, Comments (5 columns)
-  // Or Day, Stage, Start, End, Act, Comments (6 columns)
+  // Standard festival timetable ordering if headers not matched or partially matched:
+  // Common 5-column format: Venue, Act, Start, End, Comments
+  // Or 6-column format: Day, Stage, Start, End, Act, Comments
   if (startCol === -1 || endCol === -1 || artistCol === -1) {
     // Scan sample data rows to deduce column types
     const sampleRows = dataRows.slice(0, 10);
@@ -281,17 +304,20 @@ export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 
       });
     });
 
+    const threshold = Math.max(1, Math.floor(sampleRows.length * 0.4));
     const dateTimeCols = Object.keys(colTypes)
       .map(Number)
-      .filter((cIdx) => colTypes[cIdx].dateTimeScore >= Math.min(2, sampleRows.length / 2))
+      .filter((cIdx) => colTypes[cIdx].dateTimeScore >= threshold)
       .sort((a, b) => a - b);
 
     if (dateTimeCols.length >= 2) {
-      startCol = dateTimeCols[0];
-      endCol = dateTimeCols[1];
+      if (startCol === -1) startCol = dateTimeCols[0];
+      if (endCol === -1) endCol = dateTimeCols[1];
+    } else if (dateTimeCols.length === 1) {
+      if (startCol === -1) startCol = dateTimeCols[0];
     }
 
-    // Standard Clashfinder pattern: Col 0 = Stage/Venue, Col 1 = Act/Artist, Col 2 = Start, Col 3 = End, Col 4 = Notes
+    // Standard pattern: Col 0 = Stage/Venue, Col 1 = Act/Artist, Col 2 = Start, Col 3 = End, Col 4 = Notes
     if (startCol === 2 && endCol === 3) {
       if (stageCol === -1) stageCol = 0;
       if (artistCol === -1) artistCol = 1;
@@ -304,12 +330,46 @@ export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 
       // Act, Start, End, Stage
       if (artistCol === -1) artistCol = 0;
       if (stageCol === -1) stageCol = 3;
+    } else if (startCol === 3 && endCol === 4) {
+      // Day, Stage, Act, Start, End
+      if (dayCol === -1) dayCol = 0;
+      if (stageCol === -1) stageCol = 1;
+      if (artistCol === -1) artistCol = 2;
     } else {
-      // Fallback
-      if (stageCol === -1) stageCol = 0;
-      if (artistCol === -1) artistCol = 1;
-      if (startCol === -1) startCol = 2;
-      if (endCol === -1) endCol = 3;
+      // General heuristic: find non-date columns
+      const nonDateCols = Object.keys(colTypes)
+        .map(Number)
+        .filter((c) => c !== startCol && c !== endCol)
+        .sort((a, b) => a - b);
+
+      if (nonDateCols.length >= 2) {
+        // Compare distinct count: stages have fewer distinct values than artists
+        const c1 = nonDateCols[0];
+        const c2 = nonDateCols[1];
+        const count1 = colTypes[c1]?.distinctValues.size || 0;
+        const count2 = colTypes[c2]?.distinctValues.size || 0;
+
+        if (stageCol === -1 && artistCol === -1) {
+          if (count1 <= count2) {
+            stageCol = c1;
+            artistCol = c2;
+          } else {
+            stageCol = c2;
+            artistCol = c1;
+          }
+        } else if (stageCol === -1) {
+          stageCol = nonDateCols.find((c) => c !== artistCol) ?? 0;
+        } else if (artistCol === -1) {
+          artistCol = nonDateCols.find((c) => c !== stageCol) ?? 1;
+        }
+      } else if (nonDateCols.length === 1) {
+        if (artistCol === -1) artistCol = nonDateCols[0];
+      } else {
+        if (stageCol === -1) stageCol = 0;
+        if (artistCol === -1) artistCol = 1;
+        if (startCol === -1) startCol = 2;
+        if (endCol === -1) endCol = 3;
+      }
     }
   }
 
@@ -332,13 +392,38 @@ export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 
     const rawStage = stageCol !== -1 ? String(row[stageCol] || '').trim() : 'Main Stage';
     if (rawStage === 'Venue' || rawStage === 'Stage') return;
 
-    const rawStart = startCol !== -1 ? String(row[startCol] || '').trim() : '12:00';
-    const rawEnd = endCol !== -1 ? String(row[endCol] || '').trim() : '13:00';
+    let rawStart = startCol !== -1 ? String(row[startCol] || '').trim() : '12:00';
+    let rawEnd = endCol !== -1 ? String(row[endCol] || '').trim() : '';
     const rawDay = dayCol !== -1 && row[dayCol] ? String(row[dayCol]).trim() : undefined;
     const notes = notesCol !== -1 && row[notesCol] ? String(row[notesCol]).trim() : undefined;
 
+    // Range handling: e.g. "14:00 - 15:00", "14:00 – 15:00", "14:00 to 15:00", "2:00pm - 3:30pm"
+    if (rawStart && (rawStart.includes('-') || rawStart.includes('–') || rawStart.includes('—') || /\s+to\s+/i.test(rawStart))) {
+      const parts = rawStart.split(/\s*[-–—]\s*|\s+to\s+/i);
+      if (parts.length >= 2) {
+        rawStart = parts[0].trim();
+        if (!rawEnd) {
+          rawEnd = parts[1].trim();
+        }
+      }
+    }
+
     const parsedStart = parseDateTimeValue(rawStart, 6);
-    const parsedEnd = parseDateTimeValue(rawEnd, 6);
+    let parsedEnd: ParsedDateTime;
+    if (rawEnd) {
+      parsedEnd = parseDateTimeValue(rawEnd, 6);
+    } else {
+      // Default set duration: 60 minutes
+      const endH = (parsedStart.hours + 1) % 24;
+      parsedEnd = {
+        time24: `${endH.toString().padStart(2, '0')}:${parsedStart.minutes.toString().padStart(2, '0')}`,
+        isoDate: parsedStart.isoDate,
+        effectiveFestivalDate: parsedStart.effectiveFestivalDate,
+        displayDate: parsedStart.displayDate,
+        hours: endH,
+        minutes: parsedStart.minutes,
+      };
+    }
 
     const stageName = rawStage || 'Main Stage';
     stagesSet.add(stageName);
@@ -466,6 +551,6 @@ export function parseClashfinderCsv(csvText: string, festivalNameHint: string = 
     days,
     stages: stages.length > 0 ? stages : ['Main Stage'],
     sets,
-    sourceType: 'clashfinder',
+    sourceType,
   };
 }

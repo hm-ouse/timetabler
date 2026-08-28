@@ -16,7 +16,7 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { FestivalData, MatchedScheduleItem, FilterSettings, AttendanceStatus } from '../types';
-import { timeToMinutes, formatTime24h } from '../utils/clashfinderParser';
+import { timeToMinutes, formatTime24h } from '../utils/timetableParser';
 import { getRatingColorMeta, RATING_SCALE_TIERS } from '../utils/ratingColors';
 
 interface TimetableGridProps {

@@ -76,7 +76,7 @@ export interface FestivalData {
   stages: string[];
   sets: FestivalSet[];
   sourceUrl?: string;
-  sourceType?: 'clashfinder' | 'web_scrape' | 'upload' | 'preset' | 'ai_text';
+  sourceType?: 'preset' | 'upload' | 'paste_csv';
 }
 
 export type ScoreTier = 'must_see' | 'recommended' | 'medium' | 'low' | 'unrated';

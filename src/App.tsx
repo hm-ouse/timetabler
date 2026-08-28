@@ -398,19 +398,34 @@ export const App: React.FC = () => {
       />
 
       {/* Main High-Density Workspace Canvas */}
-      <main className="flex-1 w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-5 flex flex-col lg:flex-row gap-3.5 overflow-hidden">
-        {/* Mobile Accordion Toggle for Preferences Sidebar */}
+      <main className="flex-1 w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-5 flex flex-col lg:flex-row gap-3.5 overflow-y-auto lg:overflow-hidden">
+        {/* Mobile Accordion Toggle for Intelligence Hub & Sources */}
         <div className="lg:hidden">
           <button
+            id="btn-mobile-sidebar-toggle"
             type="button"
             onClick={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
-            className="w-full flex items-center justify-between px-4 py-2.5 bg-[#161420] border border-[#2a253d]/80 rounded-xl text-xs font-semibold text-[#b7b2c6] shadow-sm hover:text-white transition"
+            className="w-full flex items-center justify-between px-3.5 py-2.5 bg-[#161420] border border-[#2a253d]/80 rounded-xl text-xs font-semibold text-[#b7b2c6] shadow-sm hover:text-white hover:border-[#3d3655] transition"
+            aria-expanded={isMobileSidebarOpen}
           >
-            <div className="flex items-center gap-2">
-              <BarChart2 className="w-4 h-4 text-emerald-400" />
-              <span>Data Intelligence & Preferences ({ratings.length} artists)</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`w-2 h-2 rounded-full ${ratings.length > 0 ? 'bg-emerald-400' : 'bg-amber-400'} shrink-0`} />
+              <BarChart2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-bold text-white truncate">Intelligence Hub & Sources</span>
+              <span className="text-[11px] text-[#8e88a3] font-normal truncate hidden sm:inline">
+                ({ratings.length} acts • {festival.name})
+              </span>
             </div>
-            {isMobileSidebarOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] font-mono text-emerald-400/90 font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">
+                {isMobileSidebarOpen ? 'Hide Hub' : 'Open Hub'}
+              </span>
+              {isMobileSidebarOpen ? (
+                <ChevronUp className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-[#8e88a3]" />
+              )}
+            </div>
           </button>
         </div>
 
@@ -496,8 +511,13 @@ export const App: React.FC = () => {
 
         {/* Full Left Side: Data Intelligence & Preference Stats Rail (Desktop expanded or mobile toggled) */}
         {(!isSidebarCollapsed || isMobileSidebarOpen) && (
-          <aside className={`w-full lg:w-80 bg-[#161420] border border-[#2a253d]/80 rounded-2xl p-4 flex flex-col gap-4 shrink-0 shadow-xl transition-all duration-300 ${isSidebarCollapsed ? 'lg:hidden' : ''}`}>
-            {/* Header with Title, Subtitle and Collapse Button */}
+          <aside
+            id="intelligence-hub-aside"
+            className={`w-full lg:w-80 bg-[#161420] border border-[#2a253d]/80 rounded-2xl p-4 flex-col gap-4 shrink-0 shadow-xl transition-all duration-300 ${
+              isMobileSidebarOpen ? 'flex' : 'hidden'
+            } ${isSidebarCollapsed ? 'lg:hidden' : 'lg:flex'}`}
+          >
+            {/* Header with Title, Subtitle and Collapse Buttons */}
             <div className="pb-2 border-b border-[#262137]/80">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -506,15 +526,30 @@ export const App: React.FC = () => {
                     Intelligence Hub
                   </span>
                 </div>
-                <button
-                  id="btn-sidebar-collapse"
-                  type="button"
-                  onClick={toggleSidebar}
-                  className="hidden lg:flex p-1.5 rounded-lg text-[#9d97b0] hover:text-white hover:bg-[#231f32] transition items-center justify-center"
-                  title="Collapse sidebar to maximize timetable canvas"
-                >
-                  <PanelLeftClose className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {/* Mobile close/collapse button */}
+                  <button
+                    id="btn-mobile-sidebar-close"
+                    type="button"
+                    onClick={() => setIsMobileSidebarOpen(false)}
+                    className="lg:hidden px-2.5 py-1 rounded-lg text-xs font-semibold text-[#9d97b0] hover:text-white hover:bg-[#231f32] transition flex items-center gap-1 border border-[#2a253d]/80"
+                    title="Collapse Intelligence Hub"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Hide</span>
+                  </button>
+
+                  {/* Desktop collapse button */}
+                  <button
+                    id="btn-sidebar-collapse"
+                    type="button"
+                    onClick={toggleSidebar}
+                    className="hidden lg:flex p-1.5 rounded-lg text-[#9d97b0] hover:text-white hover:bg-[#231f32] transition items-center justify-center"
+                    title="Collapse sidebar to maximize timetable canvas"
+                  >
+                    <PanelLeftClose className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <p className="text-[11px] text-[#8e88a3] mt-1 leading-snug">
                 Configure your data sources below to generate your personalized festival schedule.
@@ -594,7 +629,7 @@ export const App: React.FC = () => {
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-white leading-tight">Festival Timetable</h4>
-                      <p className="text-[10px] text-[#8e88a3]">Clashfinder schedule & stages</p>
+                      <p className="text-[10px] text-[#8e88a3]">Stages, set times & lineup</p>
                     </div>
                   </div>
                   <span className="text-[10px] font-mono font-bold text-indigo-300 bg-indigo-500/15 px-2 py-0.5 rounded-full border border-indigo-500/25 shrink-0">
@@ -620,7 +655,7 @@ export const App: React.FC = () => {
                   type="button"
                   onClick={() => setIsLineupModalOpen(true)}
                   className="w-full py-1.5 px-2.5 bg-[#262137] hover:bg-[#312a47] text-white hover:text-indigo-200 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 border border-[#362f4e]"
-                  title="Import Clashfinder or switch festival lineup"
+                  title="Switch festival or import timetable"
                 >
                   <Sparkles className="w-3 h-3 text-indigo-400" />
                   <span>Change Lineup</span>
@@ -849,6 +884,17 @@ export const App: React.FC = () => {
             >
               <CalendarCheck2 className="w-3.5 h-3.5" />
               <span>Export to Calendar</span>
+            </button>
+
+            {/* Mobile Bottom Collapse Button */}
+            <button
+              id="btn-mobile-sidebar-bottom-close"
+              type="button"
+              onClick={() => setIsMobileSidebarOpen(false)}
+              className="lg:hidden w-full py-2 bg-[#12101a] hover:bg-[#1a1726] text-[#9d97b0] hover:text-white rounded-xl text-xs font-semibold transition border border-[#262137] flex items-center justify-center gap-1.5"
+            >
+              <ChevronUp className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Collapse Intelligence Hub</span>
             </button>
           </aside>
         )}

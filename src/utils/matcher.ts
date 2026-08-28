@@ -1,6 +1,6 @@
 import { UserRating, FestivalSet, MatchedScheduleItem, ScoreTier, AttendanceStatus } from '../types';
 import { normalizeArtistName } from './sheetParser';
-import { timeToMinutes } from './clashfinderParser';
+import { timeToMinutes } from './timetableParser';
 
 /**
  * Calculates similarity between two strings (0 to 1)

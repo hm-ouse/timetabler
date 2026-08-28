@@ -1,20 +1,18 @@
 import React, { useState } from 'react';
 import {
   Sparkles,
-  Globe,
   Upload,
   Layers,
-  Search,
+  ClipboardPaste,
   CheckCircle,
   AlertCircle,
   FileText,
   Calendar,
   X,
   RefreshCw,
-  ExternalLink,
 } from 'lucide-react';
 import { FestivalData, FestivalSet } from '../types';
-import { parseClashfinderCsv, formatTime24h } from '../utils/clashfinderParser';
+import { parseFestivalCsv, formatTime24h } from '../utils/timetableParser';
 import { SAMPLE_FESTIVALS } from '../data/samplePresets';
 
 interface LineupManagerModalProps {
@@ -30,178 +28,41 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
   currentFestival,
   onUpdateFestival,
 }) => {
-  const [activeTab, setActiveTab] = useState<'clashfinder' | 'ai_web' | 'paste_text' | 'upload_csv' | 'presets'>('presets');
-  const [clashfinderUrl, setClashfinderUrl] = useState('');
-  const [webQuery, setWebQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'presets' | 'paste_text' | 'upload_csv'>('presets');
   const [rawScheduleText, setRawScheduleText] = useState('');
   const [festivalNameHint, setFestivalNameHint] = useState('');
-  const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  // Handle Clashfinder fetch
-  const handleFetchClashfinder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!clashfinderUrl.trim()) return;
-
-    setLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      const response = await fetch('/api/fetch-clashfinder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: clashfinderUrl }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to parse Clashfinder URL');
-      }
-
-      let newFestival: FestivalData;
-      if (data.format === 'csv') {
-        newFestival = parseClashfinderCsv(data.data, 'Clashfinder Festival');
-        newFestival.sourceUrl = clashfinderUrl;
-      } else if (data.format === 'structured') {
-        const d = data.data;
-        newFestival = {
-          name: d.festivalName || 'Clashfinder Festival',
-          days: d.days || [{ id: 'day-1', name: 'Day 1' }],
-          stages: d.stages || ['Main Stage'],
-          sets: (d.sets || []).map((s: any, idx: number) => ({
-            id: `cf-set-${idx + 1}`,
-            artist: s.artist,
-            stage: s.stage,
-            dayId: s.day.toLowerCase().replace(/[^\w]/g, '-') || 'day-1',
-            dayName: s.day,
-            startTime: formatTime24h(s.startTime),
-            endTime: formatTime24h(s.endTime),
-            description: s.notes,
-          })),
-          sourceUrl: clashfinderUrl,
-          sourceType: 'clashfinder',
-        };
-      } else {
-        throw new Error('Unrecognized response format from Clashfinder');
-      }
-
-      onUpdateFestival(newFestival);
-      setSuccessMsg(`Successfully imported ${newFestival.sets.length} sets across ${newFestival.stages.length} stages from Clashfinder!`);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Could not fetch Clashfinder. You can also paste the CSV or timetable text.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle AI Web Scraping / Search
-  const handleScrapeWeb = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!webQuery.trim()) return;
-
-    setLoading(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      const isUrl = webQuery.startsWith('http://') || webQuery.startsWith('https://');
-      const response = await fetch('/api/scrape-festival-lineup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: isUrl ? undefined : webQuery,
-          festivalUrl: isUrl ? webQuery : undefined,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to extract lineup');
-      }
-
-      const s = data.schedule;
-      const newFestival: FestivalData = {
-        name: s.festivalName || webQuery,
-        location: s.location,
-        year: s.year,
-        days: s.days || [{ id: 'day-1', name: 'Day 1' }],
-        stages: s.stages || ['Main Stage'],
-        sets: (s.sets || []).map((set: any, idx: number) => ({
-          id: `ai-set-${idx + 1}`,
-          artist: set.artist,
-          stage: set.stage,
-          dayId: (set.day || 'day-1').toLowerCase().replace(/[^\w]/g, '-'),
-          dayName: set.day || 'Day 1',
-          startTime: formatTime24h(set.startTime),
-          endTime: formatTime24h(set.endTime),
-          description: set.description,
-        })),
-        sourceType: 'web_scrape',
-      };
-
-      onUpdateFestival(newFestival);
-      setSuccessMsg(`Found and extracted ${newFestival.sets.length} timetable sets for "${newFestival.name}"!`);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Could not find schedule. Try entering the Clashfinder URL or pasting the schedule text.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle AI Text extraction from pasted timetable
-  const handleExtractTextSchedule = async () => {
+  // Handle parsing pasted CSV / spreadsheet timetable data (same as pasting ratings)
+  const handleParsePastedSchedule = () => {
     if (!rawScheduleText.trim()) {
-      setErrorMsg('Please paste the timetable text.');
+      setErrorMsg('Please paste timetable CSV or spreadsheet cells.');
       return;
     }
 
-    setLoading(true);
     setErrorMsg(null);
     setSuccessMsg(null);
 
     try {
-      const response = await fetch('/api/ai-extract-text-schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          rawText: rawScheduleText,
-          festivalNameHint: festivalNameHint || 'Custom Festival',
-        }),
-      });
+      const festivalName = festivalNameHint.trim() || 'Custom Festival Lineup';
+      const parsedFestival = parseFestivalCsv(rawScheduleText, festivalName, 'paste_csv');
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to extract timetable');
+      if (!parsedFestival.sets || parsedFestival.sets.length === 0) {
+        setErrorMsg(
+          'No valid timetable sets detected in pasted data. Please check that columns contain Artist/Act, Stage/Venue, and Start/End times (e.g. Stage, Act, Start, End, Day).'
+        );
+        return;
       }
 
-      const s = data.schedule;
-      const newFestival: FestivalData = {
-        name: s.festivalName || festivalNameHint || 'Custom Festival',
-        days: s.days || [{ id: 'day-1', name: 'Day 1' }],
-        stages: s.stages || ['Main Stage'],
-        sets: (s.sets || []).map((set: any, idx: number) => ({
-          id: `txt-set-${idx + 1}`,
-          artist: set.artist,
-          stage: set.stage,
-          dayId: (set.day || 'day-1').toLowerCase().replace(/[^\w]/g, '-'),
-          dayName: set.day || 'Day 1',
-          startTime: formatTime24h(set.startTime),
-          endTime: formatTime24h(set.endTime),
-          description: set.notes,
-        })),
-        sourceType: 'ai_text',
-      };
-
-      onUpdateFestival(newFestival);
-      setSuccessMsg(`Extracted ${newFestival.sets.length} sets from pasted timetable!`);
+      onUpdateFestival(parsedFestival);
+      setSuccessMsg(
+        `Successfully imported ${parsedFestival.sets.length} sets across ${parsedFestival.stages.length} stages and ${parsedFestival.days.length} days for "${parsedFestival.name}"!`
+      );
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to parse text schedule.');
-    } finally {
-      setLoading(false);
+      setErrorMsg(err.message || 'Failed to parse pasted timetable CSV. Please check formatting.');
     }
   };
 
@@ -214,7 +75,7 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
     reader.onload = (event) => {
       const text = event.target?.result as string;
       if (text) {
-        const parsed = parseClashfinderCsv(text, file.name.replace(/\.[^/.]+$/, ''));
+        const parsed = parseFestivalCsv(text, file.name.replace(/\.[^/.]+$/, ''), 'upload');
         onUpdateFestival(parsed);
         setSuccessMsg(`Imported ${parsed.sets.length} sets from ${file.name}!`);
       }
@@ -243,7 +104,7 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-white">Festival Timetable & Lineup Source</h2>
               <p className="text-xs text-slate-400">
-                Load full timetables from Clashfinder.com, scrape the web with AI, upload CSVs, or choose a preset.
+                Load full timetables from presets, paste CSV or spreadsheet timetable data, or upload files.
               </p>
             </div>
           </div>
@@ -271,28 +132,6 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
             <span>Festival Presets</span>
           </button>
           <button
-            id="tab-clashfinder"
-            type="button"
-            onClick={() => setActiveTab('clashfinder')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              activeTab === 'clashfinder' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>Clashfinder.com</span>
-          </button>
-          <button
-            id="tab-ai-web"
-            type="button"
-            onClick={() => setActiveTab('ai_web')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              activeTab === 'ai_web' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            <Search className="w-3.5 h-3.5" />
-            <span>Web Scraper / AI Search</span>
-          </button>
-          <button
             id="tab-paste-text"
             type="button"
             onClick={() => setActiveTab('paste_text')}
@@ -300,8 +139,8 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
               activeTab === 'paste_text' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-300 hover:text-white'
             }`}
           >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Paste Schedule Text</span>
+            <ClipboardPaste className="w-3.5 h-3.5" />
+            <span>Paste Schedule CSV</span>
           </button>
           <button
             id="tab-upload-csv"
@@ -396,125 +235,93 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
             </div>
           )}
 
-          {/* Clashfinder Tab */}
-          {activeTab === 'clashfinder' && (
-            <form onSubmit={handleFetchClashfinder} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Clashfinder URL or Event Identifier
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="input-clashfinder-url"
-                    type="text"
-                    value={clashfinderUrl}
-                    onChange={(e) => setClashfinderUrl(e.target.value)}
-                    placeholder="https://clashfinder.com/s/glasto2024/ or glasto2024"
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                  />
-                  <button
-                    id="btn-fetch-clashfinder"
-                    type="submit"
-                    disabled={loading}
-                    className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition"
-                  >
-                    {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                    <span>{loading ? 'Importing...' : 'Fetch Clashfinder'}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700 text-xs text-slate-400 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-300">How Clashfinder integration works:</span>
-                  <a
-                    href="https://clashfinder.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-amber-400 hover:underline flex items-center gap-1 text-[11px]"
-                  >
-                    Browse clashfinder.com <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-                <p>
-                  Paste any Clashfinder URL or event slug. The app will parse all stages, day breakdowns, set start times, and finish times into your personalized planner.
-                </p>
-              </div>
-            </form>
-          )}
-
-          {/* AI Web Scraping / Search Tab */}
-          {activeTab === 'ai_web' && (
-            <form onSubmit={handleScrapeWeb} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Festival Name or Official Schedule Webpage URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="input-web-query"
-                    type="text"
-                    value={webQuery}
-                    onChange={(e) => setWebQuery(e.target.value)}
-                    placeholder="e.g. Primavera Sound 2026 set times or https://readingfestival.com/lineup/"
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                  />
-                  <button
-                    id="btn-scrape-web"
-                    type="submit"
-                    disabled={loading}
-                    className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition"
-                  >
-                    {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                    <span>{loading ? 'Searching...' : 'AI Web Scrape'}</span>
-                  </button>
-                </div>
-              </div>
-              <p className="text-xs text-slate-400">
-                Powered by Gemini 3.7 with live web search grounding to look up full lineups, stages, and set times.
-              </p>
-            </form>
-          )}
-
-          {/* Paste Schedule Text Tab */}
+          {/* Paste Schedule CSV Tab */}
           {activeTab === 'paste_text' && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Festival Name
+                  Festival Name (Optional)
                 </label>
                 <input
                   type="text"
                   value={festivalNameHint}
                   onChange={(e) => setFestivalNameHint(e.target.value)}
-                  placeholder="e.g. All Points East 2026"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white mb-2"
+                  placeholder="e.g. Glastonbury 2026, All Points East, Primavera Sound"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 mb-3"
                 />
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Paste Lineup / Timetable Text (from poster, website, or social media)
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Paste Spreadsheet Cells or CSV Timetable
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    Supports Google Sheets, Excel, & CSV
+                  </span>
+                </div>
                 <textarea
                   id="textarea-pasted-schedule"
-                  rows={6}
+                  rows={7}
                   value={rawScheduleText}
                   onChange={(e) => setRawScheduleText(e.target.value)}
-                  placeholder={`Friday - Main Stage\n14:00 - 15:00 The Last Dinner Party\n16:00 - 17:15 Michael Kiwanuka\n19:45 - 21:00 LCD Soundsystem\n22:00 - 23:45 Dua Lipa\n\nFriday - Other Stage\n17:00 - 18:00 Yard Act\n20:30 - 21:30 Fontaines D.C.\n22:30 - 23:45 Idles`}
+                  placeholder={`Venue, Act, Start, End, Day\nPyramid Stage, Dua Lipa, 22:00, 23:45, Friday\nPyramid Stage, LCD Soundsystem, 19:45, 21:00, Friday\nOther Stage, Idles, 22:30, 23:45, Friday\nOther Stage, Fontaines D.C., 20:30, 21:30, Friday\nWest Holts, Michael Kiwanuka, 21:30, 23:00, Friday`}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
                 />
               </div>
-              <div className="flex justify-end">
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                <p className="text-[11px] text-slate-400 leading-relaxed max-w-lg">
+                  Copy & paste columns directly from Google Sheets, Excel, or CSV files. Columns for Stage/Venue, Artist/Act, Start, End, and Day are recognized automatically.
+                </p>
                 <button
                   id="btn-extract-text-schedule"
                   type="button"
-                  onClick={handleExtractTextSchedule}
-                  disabled={loading}
-                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition"
+                  onClick={handleParsePastedSchedule}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition shadow-sm shrink-0"
                 >
-                  {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>AI Extract Schedule</span>
+                  <ClipboardPaste className="w-4 h-4" />
+                  <span>Parse Schedule CSV</span>
                 </button>
               </div>
+
+              {/* Parsed Preview if available */}
+              {currentFestival.sourceType === 'paste_csv' && currentFestival.sets.length > 0 && (
+                <div className="mt-4 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-amber-400">
+                      Current Lineup: {currentFestival.name}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      {currentFestival.sets.length} sets • {currentFestival.stages.length} stages • {currentFestival.days.length} days
+                    </span>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto border border-slate-800/80 rounded-lg">
+                    <table className="w-full text-[11px] text-left">
+                      <thead className="bg-slate-900 text-slate-400 border-b border-slate-800 sticky top-0">
+                        <tr>
+                          <th className="py-1 px-2.5">Artist / Act</th>
+                          <th className="py-1 px-2.5">Stage</th>
+                          <th className="py-1 px-2.5">Day</th>
+                          <th className="py-1 px-2.5">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 text-slate-300 font-mono">
+                        {currentFestival.sets.slice(0, 6).map((set) => (
+                          <tr key={set.id} className="hover:bg-slate-900/50">
+                            <td className="py-1 px-2.5 font-sans font-medium text-white">{set.artist}</td>
+                            <td className="py-1 px-2.5 text-slate-400">{set.stage}</td>
+                            <td className="py-1 px-2.5 text-slate-400">{set.dayName}</td>
+                            <td className="py-1 px-2.5 text-amber-300/90">{set.startTime} - {set.endTime}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {currentFestival.sets.length > 6 && (
+                    <p className="text-[10px] text-slate-500 text-right">
+                      + {currentFestival.sets.length - 6} more sets loaded
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -522,11 +329,11 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
           {activeTab === 'upload_csv' && (
             <div className="space-y-3">
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Upload Clashfinder CSV or Timetable File
+                Upload Timetable File (CSV, TSV, JSON)
               </label>
               <div className="border-2 border-dashed border-slate-700 hover:border-amber-500/70 rounded-2xl p-8 text-center transition bg-slate-950/40">
                 <Upload className="w-8 h-8 text-slate-500 mx-auto mb-2" />
-                <p className="text-sm font-medium text-slate-300">Upload a Clashfinder CSV, JSON, or standard timetable file</p>
+                <p className="text-sm font-medium text-slate-300">Upload a CSV, TSV, or JSON timetable file</p>
                 <input
                   id="file-input-lineup"
                   type="file"

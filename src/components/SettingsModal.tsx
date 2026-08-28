@@ -347,7 +347,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             <p className="text-[11px] text-[#b5b0c4]">
-              Clears all cached ratings, custom imported clashfinder schedules, and attendance overrides from this browser.
+              Clears all cached ratings, custom imported festival schedules, and attendance overrides from this browser.
             </p>
 
             {!confirmReset ? (

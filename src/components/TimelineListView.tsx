@@ -2,7 +2,7 @@ import React from 'react';
 import { MatchedScheduleItem, FestivalData, AttendanceStatus } from '../types';
 import { downloadIcsFile, exportScheduleCsv } from '../utils/calendarExport';
 import { getRatingColorMeta } from '../utils/ratingColors';
-import { timeToMinutes, formatTime24h } from '../utils/clashfinderParser';
+import { timeToMinutes, formatTime24h } from '../utils/timetableParser';
 
 interface TimelineListViewProps {
   festival: FestivalData;
