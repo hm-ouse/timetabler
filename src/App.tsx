@@ -27,12 +27,10 @@ import {
   UserRating,
   FestivalData,
   FilterSettings,
-  TimeSimulation,
   MatchedScheduleItem,
   AttendanceStatus,
   SheetParseResult,
 } from './types';
-import { SAMPLE_FESTIVALS, SAMPLE_RATING_SHEETS } from './data/samplePresets';
 import { parseSheetContent } from './utils/sheetParser';
 import { matchScheduleWithRatings } from './utils/matcher';
 import {
@@ -60,34 +58,33 @@ import { ArtistDetailModal } from './components/ArtistDetailModal';
 import { CalendarExportModal } from './components/CalendarExportModal';
 import { QuickRateModal } from './components/QuickRateModal';
 import { SettingsModal } from './components/SettingsModal';
+import { COSMIC_VIBRATION_2026 } from './data/festivalPresets';
+
+const DEFAULT_FESTIVAL: FestivalData = COSMIC_VIBRATION_2026;
 
 export const App: React.FC = () => {
   // 1. Initial State Initialization with safe persistence
   const [festival, setFestival] = useState<FestivalData>(() => {
     const saved = loadStoredFestival();
-    return saved || SAMPLE_FESTIVALS[0];
+    if (saved && saved.sets && saved.sets.length > 0) {
+      return saved;
+    }
+    return COSMIC_VIBRATION_2026;
   });
 
   const [ratings, setRatings] = useState<UserRating[]>(() => {
     const saved = loadStoredRatings();
-    if (saved && saved.ratings.length > 0) {
-      return saved.ratings;
-    }
-    const parsed = parseSheetContent(SAMPLE_RATING_SHEETS[0].csvContent, 'auto');
-    return parsed.ratings;
+    return saved ? saved.ratings : [];
   });
 
   const [sheetMeta, setSheetMeta] = useState<SheetParseResult | undefined>(() => {
     const saved = loadStoredRatings();
-    if (saved && saved.meta) {
-      return saved.meta;
-    }
-    return parseSheetContent(SAMPLE_RATING_SHEETS[0].csvContent, 'auto');
+    return saved?.meta;
   });
 
   const [rawCsv, setRawCsv] = useState<string>(() => {
     const saved = loadStoredRatings();
-    return saved?.rawCsv || SAMPLE_RATING_SHEETS[0].csvContent;
+    return saved?.rawCsv || '';
   });
 
   // Collapsible sidebar state
@@ -139,15 +136,7 @@ export const App: React.FC = () => {
     validateAndCleanStorage();
   }, []);
 
-  // Time simulation state for festival testing
-  const [timeSim, setTimeSim] = useState<TimeSimulation>({
-    enabled: true,
-    simulatedTime: '20:45',
-    simulatedDayId: 'friday',
-    autoAdvance: false,
-  });
-
-  // Real-world clock tick
+  // Real-world clock tick (updates every 10 seconds)
   const [realClock, setRealClock] = useState<string>(() => {
     const now = new Date();
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -161,7 +150,16 @@ export const App: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const activeTimeString = timeSim.enabled ? timeSim.simulatedTime : realClock;
+  // Current active day based on today's weekday or fallback to first festival day
+  const currentDayId = useMemo(() => {
+    if (!festival.days || festival.days.length === 0) return 'friday';
+    const now = new Date();
+    const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const match = festival.days.find(
+      (d) => d.id.toLowerCase() === dayOfWeek || d.name.toLowerCase().includes(dayOfWeek)
+    );
+    return match ? match.id : festival.days[0].id;
+  }, [festival.days]);
 
   // Active Modals state
   const [isSheetModalOpen, setIsSheetModalOpen] = useState(false);
@@ -187,11 +185,11 @@ export const App: React.FC = () => {
       festival.sets,
       ratings,
       filterSettings.minScorePercent,
-      { dayId: timeSim.enabled ? timeSim.simulatedDayId : 'friday', time: activeTimeString },
+      { dayId: currentDayId, time: realClock },
       userStatusOverrides,
       8
     );
-  }, [festival.sets, ratings, filterSettings.minScorePercent, timeSim, activeTimeString, userStatusOverrides]);
+  }, [festival.sets, ratings, filterSettings.minScorePercent, currentDayId, realClock, userStatusOverrides]);
 
   // Real-time lookup for currently selected artist modal item so rating/review changes reflect live
   const activeSelectedArtistItem = useMemo(() => {
@@ -276,14 +274,13 @@ export const App: React.FC = () => {
     saveStoredFestival(newFest);
   };
 
-  // Reset all application data and storage back to default initial state
+  // Reset all application data and storage back to default clean initial state
   const handleResetAllData = () => {
     resetAllStorageData();
-    setFestival(SAMPLE_FESTIVALS[0]);
-    const defaultParsed = parseSheetContent(SAMPLE_RATING_SHEETS[0].csvContent, 'auto');
-    setRatings(defaultParsed.ratings);
-    setSheetMeta(defaultParsed);
-    setRawCsv(SAMPLE_RATING_SHEETS[0].csvContent);
+    setFestival(DEFAULT_FESTIVAL);
+    setRatings([]);
+    setSheetMeta(undefined);
+    setRawCsv('');
     setUserStatusOverrides({});
     setFilterSettings({
       minScorePercent: 60,
@@ -389,8 +386,6 @@ export const App: React.FC = () => {
       {/* High-Density Top Navigation */}
       <Navbar
         festival={festival}
-        timeSim={timeSim}
-        setTimeSim={setTimeSim}
         currentTimeFormatted={realClock}
         filterSettings={filterSettings}
         setFilterSettings={handleUpdateFilterSettings}
@@ -1044,10 +1039,11 @@ export const App: React.FC = () => {
                 matchedItems={matchedScheduleItems}
                 filterSettings={filterSettings}
                 setFilterSettings={setFilterSettings}
-                currentTimeString={activeTimeString}
-                currentDayId={timeSim.enabled ? timeSim.simulatedDayId : 'friday'}
+                currentTimeString={realClock}
+                currentDayId={currentDayId}
                 onSelectArtist={(item) => setSelectedArtistItem(item)}
                 onToggleStatus={handleToggleStatus}
+                onOpenLineupModal={() => setIsLineupModalOpen(true)}
                 onQuickRate={(artistName, score, review, genre) => {
                   setQuickRateState({
                     isOpen: true,
@@ -1070,7 +1066,7 @@ export const App: React.FC = () => {
                   }
                   return filterSettings.showUnrated !== false || m.status === 'attending';
                 })}
-                currentTimeString={activeTimeString}
+                currentTimeString={realClock}
                 dimPastSets={filterSettings.dimPastSets}
                 minScoreCutoff={filterSettings.minScorePercent}
                 onCutoffChange={(val) => setFilterSettings((prev) => ({ ...prev, minScorePercent: val }))}

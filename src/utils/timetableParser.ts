@@ -215,34 +215,89 @@ export function parseFestivalCsv(
   }
 
   const rawRows = parsed.data;
+  let detectedFestivalName = festivalNameHint;
   let headerRowIndex = -1;
   let headers: string[] = [];
-
-  // Check if first row is a header (must not contain time cells, and must match known header keywords)
-  const firstRow = rawRows[0].map((c: any) => String(c || '').trim());
-  const hasTimeCellInFirstRow = firstRow.some((cell) => isDateTimeCell(cell));
 
   const knownHeaderWords = new Set([
     'venue', 'stage', 'stages', 'act', 'acts', 'artist', 'artists',
     'band', 'bands', 'performer', 'performers', 'start', 'starts',
     'start time', 'end', 'ends', 'end time', 'time', 'times',
-    'day', 'days', 'date', 'dates', 'notes', 'comments', 'comment', 'slot', 'location'
+    'day', 'days', 'date', 'dates', 'notes', 'comments', 'comment', 'slot', 'location',
+    'short name', 'extra data'
   ]);
 
-  const headerMatches = firstRow.filter((cell) => {
-    const l = cell.toLowerCase().trim();
-    if (knownHeaderWords.has(l)) return true;
-    return ['venue', 'stage', 'artist', 'act', 'band', 'start', 'end', 'time', 'day', 'date'].some(
-      (kw) => l === kw || l.startsWith(kw + ' ') || l.endsWith(' ' + kw)
-    );
-  });
+  // 1. Scan the first rows for Clashfinder metadata (e.g. "// name,Cosmic Vibration 2026") and actual header row
+  for (let rIdx = 0; rIdx < Math.min(rawRows.length, 30); rIdx++) {
+    const row = rawRows[rIdx];
+    if (!row || row.length === 0) continue;
 
-  if (!hasTimeCellInFirstRow && headerMatches.length >= 1) {
-    headerRowIndex = 0;
-    headers = firstRow;
+    const row0 = String(row[0] || '').trim();
+
+    // Check for festival name in comment metadata (e.g. Clashfinder "// name,Cosmic Vibration 2026")
+    if (/^\/\/\s*name/i.test(row0) || /^#\s*name/i.test(row0)) {
+      const candidateName = String(row[1] || row0.replace(/^[/#\s]*name[:,\s]*/i, '')).trim();
+      if (candidateName && (!detectedFestivalName || detectedFestivalName === 'Festival Lineup' || detectedFestivalName === 'Custom Festival Lineup')) {
+        detectedFestivalName = candidateName;
+      }
+    }
+
+    // Clean cells: strip leading comment markers like "// " or "#"
+    const cleanedRow = row.map((c: any) => String(c || '').replace(/^[/#\s]+/, '').trim());
+    const hasTime = cleanedRow.some((cell) => isDateTimeCell(cell));
+
+    // Check if this row is a header row (must not contain date/time values)
+    if (!hasTime) {
+      const headerMatches = cleanedRow.filter((cell) => {
+        const l = cell.toLowerCase().trim();
+        if (knownHeaderWords.has(l)) return true;
+        return ['venue', 'stage', 'artist', 'act', 'band', 'start', 'end', 'time', 'day', 'date', 'location'].some(
+          (kw) => l === kw || l.startsWith(kw + ' ') || l.endsWith(' ' + kw)
+        );
+      });
+
+      const hasStart = cleanedRow.some((c) => /^(start|starts|from|on)/i.test(c.trim()));
+      const hasEndOrAct = cleanedRow.some((c) => /^(end|ends|to|act|artist|name|band|stage|venue|location)/i.test(c.trim()));
+
+      if (headerMatches.length >= 2 || (hasStart && hasEndOrAct)) {
+        headerRowIndex = rIdx;
+        headers = cleanedRow;
+        break;
+      }
+    }
   }
 
-  const dataRows = headerRowIndex !== -1 ? rawRows.slice(headerRowIndex + 1) : rawRows;
+  // If no header row found via scan, check if row 0 could be a header
+  if (headerRowIndex === -1 && rawRows.length > 0) {
+    const firstRow = rawRows[0].map((c: any) => String(c || '').trim());
+    const hasTimeCellInFirstRow = firstRow.some((cell) => isDateTimeCell(cell));
+    if (!hasTimeCellInFirstRow) {
+      const headerMatches = firstRow.filter((cell) => {
+        const l = cell.toLowerCase().trim();
+        if (knownHeaderWords.has(l)) return true;
+        return ['venue', 'stage', 'artist', 'act', 'band', 'start', 'end', 'time', 'day', 'date'].some(
+          (kw) => l === kw || l.startsWith(kw + ' ') || l.endsWith(' ' + kw)
+        );
+      });
+      if (headerMatches.length >= 1) {
+        headerRowIndex = 0;
+        headers = firstRow;
+      }
+    }
+  }
+
+  // Filter out any metadata/comment rows from dataRows
+  const candidateRows = headerRowIndex !== -1 ? rawRows.slice(headerRowIndex + 1) : rawRows;
+  const dataRows = candidateRows.filter((r) => {
+    if (!r || r.length === 0) return false;
+    const firstCell = String(r[0] || '').trim();
+    if (!firstCell) {
+      return r.some((c: any) => Boolean(String(c || '').trim()));
+    }
+    // Skip comment lines (e.g. Clashfinder metadata)
+    if (firstCell.startsWith('//') || firstCell.startsWith('#')) return false;
+    return true;
+  });
 
   // Column Index mapping
   let dayCol = -1;
@@ -547,7 +602,7 @@ export function parseFestivalCsv(
   const stages = Array.from(stagesSet);
 
   return {
-    name: festivalNameHint,
+    name: detectedFestivalName || festivalNameHint,
     days,
     stages: stages.length > 0 ? stages : ['Main Stage'],
     sets,

@@ -29,6 +29,7 @@ interface TimetableGridProps {
   onSelectArtist: (item: MatchedScheduleItem) => void;
   onToggleStatus: (setId: string, newStatus: AttendanceStatus) => void;
   onQuickRate?: (artistName: string, currentScore: number, currentReview?: string, currentGenre?: string) => void;
+  onOpenLineupModal?: () => void;
 }
 
 export const TimetableGrid: React.FC<TimetableGridProps> = ({
@@ -41,6 +42,7 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
   onSelectArtist,
   onToggleStatus,
   onQuickRate,
+  onOpenLineupModal,
 }) => {
   const [selectedDayId, setSelectedDayId] = useState<string>(
     festival.days[0]?.id || 'friday'
@@ -614,6 +616,37 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Empty Lineup Call to Action */}
+        {festival.sets.length === 0 && (
+          <div
+            id="empty-timetable-overlay"
+            className="absolute inset-0 z-30 flex items-center justify-center p-6 bg-[#0d0c13]/85 backdrop-blur-xs"
+          >
+            <div className="max-w-md w-full bg-[#161420] border border-[#2a253d] rounded-2xl p-6 sm:p-8 text-center space-y-4 shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto">
+                <Calendar className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="text-base font-bold text-white">No Timetable Sets Loaded</h3>
+                <p className="text-xs text-[#9d97b0] leading-relaxed">
+                  Import your festival schedule by pasting spreadsheet timetable rows (Stage, Act, Start, End, Day) or uploading a CSV file.
+                </p>
+              </div>
+              {onOpenLineupModal && (
+                <button
+                  id="btn-empty-grid-open-lineup"
+                  type="button"
+                  onClick={onOpenLineupModal}
+                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-md inline-flex items-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Import Festival Timetable</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

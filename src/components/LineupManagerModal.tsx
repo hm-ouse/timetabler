@@ -10,10 +10,17 @@ import {
   Calendar,
   X,
   RefreshCw,
+  ExternalLink,
+  MapPin,
+  Music,
 } from 'lucide-react';
 import { FestivalData, FestivalSet } from '../types';
 import { parseFestivalCsv, formatTime24h } from '../utils/timetableParser';
-import { SAMPLE_FESTIVALS } from '../data/samplePresets';
+import {
+  FESTIVAL_PRESETS,
+  COSMIC_VIBRATION_2026,
+  COSMIC_VIBRATION_2026_CSV,
+} from '../data/festivalPresets';
 
 interface LineupManagerModalProps {
   isOpen: boolean;
@@ -28,13 +35,31 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
   currentFestival,
   onUpdateFestival,
 }) => {
-  const [activeTab, setActiveTab] = useState<'presets' | 'paste_text' | 'upload_csv'>('presets');
+  const [activeTab, setActiveTab] = useState<'preset' | 'paste_text' | 'upload_csv'>('preset');
   const [rawScheduleText, setRawScheduleText] = useState('');
   const [festivalNameHint, setFestivalNameHint] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const isCurrentCosmicVibration =
+    currentFestival.name.toLowerCase().includes('cosmic vibration') &&
+    currentFestival.sets.length > 0;
+
+  const handleLoadCosmicVibration = () => {
+    setErrorMsg(null);
+    onUpdateFestival(COSMIC_VIBRATION_2026);
+    setSuccessMsg(
+      `Successfully loaded "Cosmic Vibration 2026" with ${COSMIC_VIBRATION_2026.sets.length} sets across ${COSMIC_VIBRATION_2026.stages.length} stages!`
+    );
+  };
+
+  const handleInspectCsvInEditor = () => {
+    setRawScheduleText(COSMIC_VIBRATION_2026_CSV);
+    setFestivalNameHint('Cosmic Vibration 2026');
+    setActiveTab('paste_text');
+  };
 
   // Handle parsing pasted CSV / spreadsheet timetable data (same as pasting ratings)
   const handleParsePastedSchedule = () => {
@@ -83,12 +108,6 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
     reader.readAsText(file);
   };
 
-  // Handle Preset Selection
-  const handleSelectPreset = (preset: FestivalData) => {
-    onUpdateFestival(preset);
-    setSuccessMsg(`Loaded preset: "${preset.name}" (${preset.sets.length} sets across ${preset.stages.length} stages)`);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto">
       <div
@@ -104,7 +123,7 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-white">Festival Timetable & Lineup Source</h2>
               <p className="text-xs text-slate-400">
-                Load full timetables from presets, paste CSV or spreadsheet timetable data, or upload files.
+                Load the Cosmic Vibration 2026 preset, or import your own schedule via CSV/spreadsheet paste.
               </p>
             </div>
           </div>
@@ -121,15 +140,15 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
         {/* Modal Tabs */}
         <div className="px-6 pt-4 pb-2 border-b border-slate-800 flex flex-wrap items-center gap-2 bg-slate-950/40">
           <button
-            id="tab-presets"
+            id="tab-preset-lineup"
             type="button"
-            onClick={() => setActiveTab('presets')}
+            onClick={() => setActiveTab('preset')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              activeTab === 'presets' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+              activeTab === 'preset' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-300 hover:text-white'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Festival Presets</span>
+            <span>Festival Preset</span>
           </button>
           <button
             id="tab-paste-text"
@@ -178,60 +197,136 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
             </div>
           )}
 
-          {/* Presets Tab */}
-          {activeTab === 'presets' && (
+          {/* Preset Tab */}
+          {activeTab === 'preset' && (
             <div className="space-y-4">
-              <p className="text-xs text-slate-300">
-                Choose a pre-loaded festival with complete multi-stage timetables and realistic schedule timings:
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {SAMPLE_FESTIVALS.map((f) => (
-                  <div
-                    key={f.name}
-                    id={`festival-card-${f.name.toLowerCase().replace(/\s+/g, '-')}`}
-                    className={`p-4 rounded-xl border transition flex flex-col justify-between ${
-                      currentFestival.name === f.name
-                        ? 'bg-amber-950/40 border-amber-500/80 ring-1 ring-amber-500/40'
-                        : 'bg-slate-800/80 border-slate-700 hover:border-amber-500/50'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <h3 className="text-sm font-bold text-white">{f.name}</h3>
-                        {currentFestival.name === f.name && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950">
-                            Active
-                          </span>
-                        )}
+              <div className="border border-slate-700/80 hover:border-amber-500/60 bg-gradient-to-b from-slate-800/60 to-slate-900/80 rounded-2xl p-5 shadow-lg transition">
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h3 className="text-lg font-bold text-white tracking-tight">
+                        Cosmic Vibration 2026
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        Official Clashfinder Preset
+                      </span>
+                      {isCurrentCosmicVibration && (
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" />
+                          Currently Active
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-300 leading-relaxed max-w-xl">
+                      Full 2-day festival schedule including doors, headliners, and stage times across Ant &amp; Leki, Martin Bedford, and The Crypt stages.
+                    </p>
+
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 pt-1">
+                      <span className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                        <span>29–30 Aug 2026 (Saturday &amp; Sunday)</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                        <span>3 Stages</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Music className="w-3.5 h-3.5 text-amber-400" />
+                        <span>52 Sets</span>
+                      </span>
+                    </div>
+
+                    {/* Stages and acts badges */}
+                    <div className="pt-2">
+                      <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                        Stages &amp; Featured Artists
                       </div>
-                      <p className="text-xs text-slate-400">{f.location}</p>
-                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-300">
-                        <span className="bg-slate-900 px-2 py-1 rounded border border-slate-700/60">
-                          📅 {f.days.length} Days
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md text-[11px] bg-slate-800 text-slate-200 border border-slate-700">
+                          Ant &amp; Leki: Pagan Altar, Hallas, Atomic Rooster, Seven Sisters
                         </span>
-                        <span className="bg-slate-900 px-2 py-1 rounded border border-slate-700/60">
-                          🎪 {f.stages.length} Stages
+                        <span className="px-2 py-0.5 rounded-md text-[11px] bg-slate-800 text-slate-200 border border-slate-700">
+                          Martin Bedford: Killer Kin, Parish, Madmess, Vassal
                         </span>
-                        <span className="bg-slate-900 px-2 py-1 rounded border border-slate-700/60">
-                          🎸 {f.sets.length} Sets
+                        <span className="px-2 py-0.5 rounded-md text-[11px] bg-slate-800 text-slate-200 border border-slate-700">
+                          The Crypt: Blind Monarch, Freeways, Warpstormer, Wizard Master
                         </span>
                       </div>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSelectPreset(f)}
-                      className={`mt-4 w-full py-2 px-3 rounded-lg text-xs font-semibold transition ${
-                        currentFestival.name === f.name
-                          ? 'bg-amber-500/30 text-amber-200 border border-amber-500/50'
-                          : 'bg-amber-600 hover:bg-amber-500 text-white shadow-sm'
-                      }`}
-                    >
-                      {currentFestival.name === f.name ? 'Currently Active' : 'Load Festival Timetable'}
-                    </button>
                   </div>
-                ))}
+
+                  {/* Actions */}
+                  <div className="flex flex-col sm:flex-row md:flex-col gap-2 shrink-0">
+                    <button
+                      id="btn-load-cosmic-vibration"
+                      type="button"
+                      onClick={handleLoadCosmicVibration}
+                      className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition shadow-sm"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>{isCurrentCosmicVibration ? 'Reload Cosmic Vibration' : 'Load Cosmic Vibration'}</span>
+                    </button>
+                    <button
+                      id="btn-inspect-cosmic-csv"
+                      type="button"
+                      onClick={handleInspectCsvInEditor}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium flex items-center justify-center gap-2 border border-slate-700 transition"
+                    >
+                      <ClipboardPaste className="w-3.5 h-3.5 text-amber-400" />
+                      <span>View / Edit CSV</span>
+                    </button>
+                    <a
+                      href="https://clashfinder.com/s/cosmicvibration2026/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 text-slate-400 hover:text-white rounded-xl text-xs flex items-center justify-center gap-1.5 transition text-center"
+                    >
+                      <span>Clashfinder Page</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
               </div>
+
+              {/* Preview of sets if active */}
+              {isCurrentCosmicVibration && (
+                <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-amber-400">
+                      Loaded Lineup Preview
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      {currentFestival.sets.length} sets • {currentFestival.stages.length} stages • {currentFestival.days.length} days
+                    </span>
+                  </div>
+                  <div className="max-h-44 overflow-y-auto border border-slate-800/80 rounded-lg">
+                    <table className="w-full text-[11px] text-left">
+                      <thead className="bg-slate-900 text-slate-400 border-b border-slate-800 sticky top-0">
+                        <tr>
+                          <th className="py-1.5 px-3">Artist / Act</th>
+                          <th className="py-1.5 px-3">Stage</th>
+                          <th className="py-1.5 px-3">Day</th>
+                          <th className="py-1.5 px-3">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 text-slate-300 font-mono">
+                        {currentFestival.sets.slice(0, 8).map((set) => (
+                          <tr key={set.id} className="hover:bg-slate-900/50">
+                            <td className="py-1.5 px-3 font-sans font-medium text-white">{set.artist}</td>
+                            <td className="py-1.5 px-3 text-slate-400">{set.stage}</td>
+                            <td className="py-1.5 px-3 text-slate-400">{set.dayName}</td>
+                            <td className="py-1.5 px-3 text-amber-300/90">{set.startTime} - {set.endTime}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[10px] text-slate-500 text-right">
+                    Showing first 8 sets of 52 total sets across all stages
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -246,7 +341,7 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
                   type="text"
                   value={festivalNameHint}
                   onChange={(e) => setFestivalNameHint(e.target.value)}
-                  placeholder="e.g. Glastonbury 2026, All Points East, Primavera Sound"
+                  placeholder="e.g. Cosmic Vibration 2026, Glastonbury, All Points East"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 mb-3"
                 />
                 <div className="flex items-center justify-between mb-1.5">
@@ -254,7 +349,7 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
                     Paste Spreadsheet Cells or CSV Timetable
                   </label>
                   <span className="text-[11px] text-slate-400">
-                    Supports Google Sheets, Excel, & CSV
+                    Supports Clashfinder, Google Sheets, Excel, &amp; CSV
                   </span>
                 </div>
                 <textarea
@@ -262,14 +357,14 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
                   rows={7}
                   value={rawScheduleText}
                   onChange={(e) => setRawScheduleText(e.target.value)}
-                  placeholder={`Venue, Act, Start, End, Day\nPyramid Stage, Dua Lipa, 22:00, 23:45, Friday\nPyramid Stage, LCD Soundsystem, 19:45, 21:00, Friday\nOther Stage, Idles, 22:30, 23:45, Friday\nOther Stage, Fontaines D.C., 20:30, 21:30, Friday\nWest Holts, Michael Kiwanuka, 21:30, 23:00, Friday`}
+                  placeholder={`// Start,End,Name,Location,Short Name,Extra Data\n2026/08/29 12:00,2026/08/29 12:30,Doors,Ant & Leki,doors(1),\n2026/08/29 13:05,2026/08/29 14:10,Breath/Rust,Ant & Leki,breath(1),\n2026/08/29 14:10,2026/08/29 15:15,Labrys,Ant & Leki,labrys(1),`}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-lg">
-                  Copy & paste columns directly from Google Sheets, Excel, or CSV files. Columns for Stage/Venue, Artist/Act, Start, End, and Day are recognized automatically.
+                  Copy &amp; paste columns directly from Clashfinder exports, Google Sheets, or CSV files. Columns for Stage/Venue, Artist/Act, Start, End, and Day are recognized automatically.
                 </p>
                 <button
                   id="btn-extract-text-schedule"
@@ -283,7 +378,7 @@ export const LineupManagerModal: React.FC<LineupManagerModalProps> = ({
               </div>
 
               {/* Parsed Preview if available */}
-              {currentFestival.sourceType === 'paste_csv' && currentFestival.sets.length > 0 && (
+              {currentFestival.sets.length > 0 && (
                 <div className="mt-4 p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-amber-400">

@@ -113,9 +113,3 @@ export interface FilterSettings {
   viewMode?: 'timetable_grid' | 'timeline_list' | 'clash_inspector' | 'ratings_sheet';
   timeDensity: 'compact' | 'standard' | 'spacious';
 }
-
-export interface TimeSimulation {
-  enabled: boolean;
-  simulatedTime: string; // HH:MM format
-  simulatedDayId: string;
-}
