@@ -220,6 +220,43 @@ export function parseSheetContent(
     };
   }
 
+  // Detect if content is an HTML webpage (e.g. Google Sign-In, error page, or website)
+  const isHtml =
+    cleanInput.toLowerCase().startsWith('<!doctype') ||
+    cleanInput.toLowerCase().startsWith('<html') ||
+    (cleanInput.startsWith('<') && cleanInput.toLowerCase().includes('</html>'));
+
+  if (isHtml) {
+    const isGoogleLogin =
+      cleanInput.includes('accounts.google.com') ||
+      cleanInput.includes('ServiceLogin') ||
+      cleanInput.includes('Sign in') ||
+      cleanInput.includes('Access Denied');
+
+    const warningMsg = isGoogleLogin
+      ? 'The Google Sheet appears to be private or requires Google login. In Google Sheets, click "Share" (top-right) and set access to "Anyone with the link can view", or copy the spreadsheet cells and paste them into the "Paste Sheet" tab.'
+      : 'The content is an HTML web page rather than spreadsheet data. Please copy the table cells directly or ensure the Google Sheet is shared with "Anyone with the link can view".';
+
+    return {
+      ratings: [],
+      detectedScale: 'None',
+      detectedMax: 10,
+      totalRows: 0,
+      validRatingsCount: 0,
+      artistColumn: '',
+      scoreColumn: '',
+      reviewColumn: '',
+      rawHeaders: [],
+      activeTabName: tabMeta?.activeTabName,
+      activeTabGid: tabMeta?.activeTabGid,
+      availableTabs: tabMeta?.availableTabs,
+      sourceUrl: tabMeta?.sourceUrl,
+      sourceType: tabMeta?.sourceType,
+      warning: warningMsg,
+      error: warningMsg,
+    };
+  }
+
   // Parse with PapaParse
   const parsed = Papa.parse<any[]>(cleanInput, {
     header: false,

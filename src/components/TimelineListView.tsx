@@ -98,17 +98,82 @@ export const TimelineListView: React.FC<TimelineListViewProps> = ({
           if (sets.length === 0) return null;
 
           return (
-            <section key={day.id} id={`day-section-${day.id}`} className="space-y-2">
+            <section key={day.id} id={`day-section-${day.id}`} className="space-y-3">
               {/* Day Header in Bold Yellow Display Typography */}
-              <h2 className="text-[#facc15] font-black text-xl sm:text-2xl tracking-wider uppercase font-mono">
-                {day.name}
-              </h2>
+              <div className="flex items-center justify-between pb-1 border-b border-[#252136]">
+                <h2 className="text-[#facc15] font-black text-lg sm:text-2xl tracking-wider uppercase font-mono">
+                  {day.name}
+                </h2>
+                <span className="text-xs font-mono text-[#8e88a3] font-semibold">
+                  {sets.length} {sets.length === 1 ? 'set' : 'sets'}
+                </span>
+              </div>
 
-              {/* Responsive Table Container */}
-              <div className="overflow-x-auto rounded-xl">
+              {/* Mobile Card Layout (xs to md) */}
+              <div className="md:hidden space-y-2">
+                {sets.map((item) => {
+                  const scoreInfo = getScoreDisplay(item);
+                  const isClash = item.hasClash;
+
+                  return (
+                    <div
+                      key={item.id}
+                      id={`timeline-card-mobile-${item.id}`}
+                      onClick={() => onSelectArtist(item)}
+                      className={`p-3 rounded-xl border transition cursor-pointer ${
+                        isClash
+                          ? 'bg-[#26131a]/85 border-[#ef4444]/40 hover:bg-[#301621]'
+                          : 'bg-[#161420] border-[#2a253d]/80 hover:border-[#3e3754]'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-sm text-white tracking-tight truncate">
+                              {item.set.artist}
+                            </span>
+                            {isClash && (
+                              <span className="px-1.5 py-0.5 rounded border border-[#ef4444]/80 text-[#f87171] font-mono text-[9px] font-bold lowercase bg-[#450a0a]/50">
+                                clash
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-[#8e88a3] font-medium block">
+                            {item.set.stage}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-col items-end shrink-0">
+                          <span className="font-mono font-bold text-xs text-[#facc15] whitespace-nowrap">
+                            {formatTimeRange(item.set.startTime, item.set.endTime)}
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{ backgroundColor: scoreInfo.dot }}
+                            />
+                            <span className={`font-mono font-bold text-xs ${scoreInfo.textClass}`}>
+                              {scoreInfo.label}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {item.rating?.reviewSummary && (
+                        <p className="text-xs text-[#b5b0c4] line-clamp-2 pt-1 border-t border-[#252136]">
+                          {item.rating.reviewSummary}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table View */}
+              <div className="hidden md:block overflow-x-auto rounded-2xl border border-[#2a253d]/80 bg-[#161420] shadow-md">
                 <table className="w-full text-left border-collapse min-w-[700px]">
                   <thead>
-                    <tr className="border-b border-[#2a253d] text-[11px] font-bold uppercase tracking-widest text-[#7c768e]">
+                    <tr className="border-b border-[#2a253d] text-[11px] font-bold uppercase tracking-widest text-[#7c768e] bg-[#12101a]">
                       <th className="py-3 px-3 w-[20%] font-semibold">TIME</th>
                       <th className="py-3 px-3 w-[22%] font-semibold">ARTIST</th>
                       <th className="py-3 px-3 w-[18%] font-semibold">STAGE</th>
@@ -192,12 +257,12 @@ export const TimelineListView: React.FC<TimelineListViewProps> = ({
       </div>
 
       {/* 3. Bottom Action Buttons: Download CSV & Download Calendar (.ics) */}
-      <div id="timeline-action-buttons" className="flex flex-wrap items-center gap-3 pt-4">
+      <div id="timeline-action-buttons" className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-4">
         <button
           id="btn-download-csv"
           type="button"
           onClick={() => exportScheduleCsv(items, festival)}
-          className="px-6 py-3 bg-[#eab308] hover:bg-[#facc15] text-slate-950 font-bold rounded-xl text-sm transition shadow-md shadow-amber-950/30 flex items-center justify-center gap-2 cursor-pointer"
+          className="flex-1 sm:flex-initial px-6 py-3 bg-[#eab308] hover:bg-[#facc15] text-slate-950 font-bold rounded-xl text-sm transition shadow-md shadow-amber-950/30 flex items-center justify-center gap-2 cursor-pointer"
         >
           <span>Download CSV</span>
         </button>
@@ -206,7 +271,7 @@ export const TimelineListView: React.FC<TimelineListViewProps> = ({
           id="btn-download-calendar-ics"
           type="button"
           onClick={() => downloadIcsFile(items, festival)}
-          className="px-6 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold rounded-xl text-sm transition shadow-md shadow-indigo-950/30 flex items-center justify-center gap-2 cursor-pointer"
+          className="flex-1 sm:flex-initial px-6 py-3 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold rounded-xl text-sm transition shadow-md shadow-indigo-950/30 flex items-center justify-center gap-2 cursor-pointer"
         >
           <span>Download calendar (.ics)</span>
         </button>

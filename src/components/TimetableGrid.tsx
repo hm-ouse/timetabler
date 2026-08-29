@@ -14,6 +14,9 @@ import {
   Star,
   Edit3,
   MessageSquare,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from 'lucide-react';
 import { FestivalData, MatchedScheduleItem, FilterSettings, AttendanceStatus } from '../types';
 import { timeToMinutes, formatTime24h } from '../utils/timetableParser';
@@ -48,9 +51,17 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
     festival.days[0]?.id || 'friday'
   );
   const [mobileActiveStage, setMobileActiveStage] = useState<string>('all');
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const currentTimeLineRef = useRef<HTMLDivElement>(null);
+
+  const handleZoomChange = (delta: number) => {
+    setZoomLevel((prev) => {
+      const next = Math.round((prev + delta) * 100) / 100;
+      return Math.min(2.2, Math.max(0.6, next));
+    });
+  };
 
   // Sync selected day if festival changes
   useEffect(() => {
@@ -58,6 +69,63 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
       setSelectedDayId(festival.days[0].id);
     }
   }, [festival.days, selectedDayId]);
+
+  // Touch pinch-to-zoom for mobile timetable view
+  const pinchStateRef = useRef<{
+    initialDist: number;
+    initialZoom: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const getDistance = (t1: Touch, t2: Touch) => {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const dist = getDistance(e.touches[0], e.touches[1]);
+        pinchStateRef.current = {
+          initialDist: dist,
+          initialZoom: zoomLevel,
+        };
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchStateRef.current) {
+        if (e.cancelable) e.preventDefault();
+        const dist = getDistance(e.touches[0], e.touches[1]);
+        if (pinchStateRef.current.initialDist > 10) {
+          const factor = dist / pinchStateRef.current.initialDist;
+          const target = Math.min(2.2, Math.max(0.6, pinchStateRef.current.initialZoom * factor));
+          setZoomLevel(Math.round(target * 100) / 100);
+        }
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        pinchStateRef.current = null;
+      }
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [zoomLevel]);
 
   // Stages present on this day
   const activeStages = useMemo(() => {
@@ -166,10 +234,14 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
     };
   }, [matchedItems, selectedDayId]);
 
-  // Pixels per minute scaling based on density
-  const pixelsPerMinute = filterSettings.timeDensity === 'compact' ? 1.7 : filterSettings.timeDensity === 'spacious' ? 2.8 : 2.2;
+  // Pixels per minute scaling based on density and pinch-zoom
+  const basePixelsPerMinute =
+    filterSettings.timeDensity === 'compact' ? 1.65 : filterSettings.timeDensity === 'spacious' ? 2.8 : 2.2;
+  const pixelsPerMinute = basePixelsPerMinute * zoomLevel;
   const hourHeight = 60 * pixelsPerMinute;
   const totalTimelineHeight = totalHours * hourHeight;
+  const stageColMinWidth = Math.round(Math.max(120, 160 * Math.sqrt(zoomLevel)));
+  const timeColWidth = Math.max(50, Math.round(64 * Math.min(1.25, Math.sqrt(zoomLevel))));
 
   // Jump to Current Time function
   const handleJumpToCurrentTime = () => {
@@ -207,11 +279,11 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
   ];
 
   return (
-    <div id="timetable-grid-container" className="flex flex-col h-full bg-[#161420] rounded-2xl border border-[#2a253d]/80 shadow-xl overflow-hidden">
-      {/* Top Bar: Day Selector & Controls */}
-      <div className="p-3 border-b border-[#262137] bg-[#12101a] flex flex-wrap items-center justify-between gap-2.5">
+    <div id="timetable-grid-container" className="flex flex-col h-full bg-[#161420] rounded-2xl border border-[#2a253d]/80 shadow-xl overflow-hidden min-w-0 box-border">
+      {/* Top Bar: Day Selector & Clean Controls */}
+      <div className="p-2 sm:p-2.5 border-b border-[#262137] bg-[#12101a] flex flex-col sm:flex-row sm:items-center justify-between gap-2 min-w-0 box-border overflow-hidden">
         {/* Day Tabs */}
-        <div className="flex items-center gap-1 bg-[#181523] p-1 rounded-xl border border-[#29253b] text-xs overflow-x-auto max-w-full">
+        <div className="flex items-center gap-1 bg-[#181523] p-1 rounded-xl border border-[#29253b] text-xs overflow-x-auto no-scrollbar w-full sm:w-auto min-w-0 max-w-full box-border shrink-0">
           {festival.days.map((day) => {
             const countForDay = matchedItems.filter((m) => {
               if (m.set.dayId !== day.id) return false;
@@ -227,7 +299,7 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
                 id={`day-tab-${day.id}`}
                 type="button"
                 onClick={() => setSelectedDayId(day.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition shrink-0 min-h-[36px] ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold text-xs transition shrink-0 whitespace-nowrap min-h-[32px] ${
                   selectedDayId === day.id
                     ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
                     : 'text-[#9d97b0] hover:text-[#e2deec] hover:bg-[#231f32]'
@@ -250,18 +322,18 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
           })}
         </div>
 
-        {/* View Actions & Jump Button */}
-        <div className="flex items-center gap-2">
+        {/* View Actions: Jump, Dim Past Sets, and Zoom */}
+        <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-between sm:justify-end shrink-0 min-w-0">
           {/* Jump to Current Time Button */}
           <button
             id="btn-jump-to-now"
             type="button"
             onClick={handleJumpToCurrentTime}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/90 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-emerald-950/40 min-h-[36px]"
+            className="flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 active:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/50 rounded-lg font-semibold text-xs transition shadow-sm h-8 whitespace-nowrap"
             title="Jump to current set / now playing"
           >
-            <Crosshair className="w-3.5 h-3.5" />
-            <span>Jump to Now</span>
+            <Crosshair className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Now</span>
           </button>
 
           {/* Toggle Elapsed Sets */}
@@ -274,25 +346,66 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
                 dimPastSets: !prev.dimPastSets,
               }))
             }
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs border transition min-h-[36px] ${
+            className={`flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold border transition shadow-sm h-8 whitespace-nowrap ${
               filterSettings.dimPastSets
-                ? 'bg-[#1e1b2b] border-[#312c44] text-[#e2deec]'
-                : 'bg-[#14121d] border-[#221f30] text-[#7c768e]'
+                ? 'bg-[#221e33] border-[#433c5e] text-indigo-200 hover:border-[#5a507c]'
+                : 'bg-[#151320] border-[#29253b] text-[#8e88a3] hover:text-[#e2deec]'
             }`}
-            title="Grey out sets that have already finished"
+            title={filterSettings.dimPastSets ? 'Currently dimming past sets' : 'Dim past sets'}
           >
-            {filterSettings.dimPastSets ? <Eye className="w-3.5 h-3.5 text-emerald-400" /> : <EyeOff className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">Dim Past Sets</span>
+            {filterSettings.dimPastSets ? (
+              <EyeOff className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            ) : (
+              <Eye className="w-3.5 h-3.5 text-[#8e88a3] shrink-0" />
+            )}
+            <span>{filterSettings.dimPastSets ? 'Past Dimmed' : 'Hide Past'}</span>
           </button>
 
-          {/* Density Selector */}
-          <div className="hidden md:flex items-center bg-[#100e18] rounded-xl p-0.5 border border-[#252136] text-xs text-[#8e88a3]">
+          {/* Zoom Controls (Touch / Click Pinch-zoom) */}
+          <div
+            id="timetable-zoom-controls"
+            className="flex items-center bg-[#151320] rounded-lg border border-[#29253b] p-0.5 text-xs text-[#8e88a3] h-8 shrink-0 shadow-inner"
+            title="Pinch to zoom on mobile or tap +/-"
+          >
+            <button
+              id="btn-zoom-out"
+              type="button"
+              onClick={() => handleZoomChange(-0.15)}
+              disabled={zoomLevel <= 0.6}
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#252136] hover:text-white disabled:opacity-30 transition font-bold"
+              title="Zoom Out"
+            >
+              −
+            </button>
+            <button
+              id="btn-zoom-reset"
+              type="button"
+              onClick={() => setZoomLevel(1.0)}
+              className="px-1.5 text-[10px] font-mono text-emerald-400 hover:text-emerald-300 font-bold"
+              title="Reset Zoom (100%)"
+            >
+              {Math.round(zoomLevel * 100)}%
+            </button>
+            <button
+              id="btn-zoom-in"
+              type="button"
+              onClick={() => handleZoomChange(0.15)}
+              disabled={zoomLevel >= 2.2}
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#252136] hover:text-white disabled:opacity-30 transition font-bold"
+              title="Zoom In"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Density Selector on desktop */}
+          <div className="hidden lg:flex items-center bg-[#100e18] rounded-lg p-0.5 border border-[#252136] text-xs text-[#8e88a3] h-8">
             {(['compact', 'standard', 'spacious'] as const).map((density) => (
               <button
                 key={density}
                 type="button"
                 onClick={() => setFilterSettings((prev) => ({ ...prev, timeDensity: density }))}
-                className={`px-2.5 py-1 rounded-lg capitalize text-[11px] font-medium transition ${
+                className={`px-2 py-1 rounded-md capitalize text-[10px] font-medium transition ${
                   filterSettings.timeDensity === density ? 'bg-[#29253b] text-white font-bold' : 'hover:text-[#e2deec]'
                 }`}
               >
@@ -304,12 +417,12 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
       </div>
 
       {/* Mobile Stage Filter Strip (Allows fast single-stage focusing on small mobile screens) */}
-      <div className="md:hidden px-3 py-2 bg-[#100e18] border-b border-[#262137] flex items-center gap-1.5 overflow-x-auto text-[11px]">
+      <div className="md:hidden px-2.5 py-1.5 bg-[#100e18] border-b border-[#262137] flex items-center gap-1.5 overflow-x-auto text-[11px] no-scrollbar">
         <span className="text-[10px] uppercase font-bold text-[#7c768e] shrink-0">Stage:</span>
         <button
           type="button"
           onClick={() => setMobileActiveStage('all')}
-          className={`px-2.5 py-1 rounded-lg shrink-0 font-medium transition min-h-[32px] ${
+          className={`px-2 py-1 rounded-lg shrink-0 font-medium transition min-h-[28px] ${
             mobileActiveStage === 'all'
               ? 'bg-emerald-500 text-slate-950 font-bold'
               : 'bg-[#1e1b2b] text-[#8e88a3]'
@@ -322,7 +435,7 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
             key={stg}
             type="button"
             onClick={() => setMobileActiveStage(stg)}
-            className={`px-2.5 py-1 rounded-lg shrink-0 font-medium transition min-h-[32px] ${
+            className={`px-2 py-1 rounded-lg shrink-0 font-medium transition min-h-[28px] ${
               mobileActiveStage === stg
                 ? 'bg-emerald-500 text-slate-950 font-bold'
                 : 'bg-[#1e1b2b] text-[#8e88a3]'
@@ -334,7 +447,7 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
       </div>
 
       {/* Rating Color Scale Legend Bar */}
-      <div className="px-3 py-1.5 bg-[#0f0d16] border-b border-[#252136] flex items-center justify-between text-[10px] overflow-x-auto">
+      <div className="px-2.5 sm:px-3 py-1 bg-[#0f0d16] border-b border-[#252136] flex items-center justify-between text-[10px] overflow-x-auto no-scrollbar">
         <span className="font-bold text-[#7c768e] uppercase tracking-widest text-[9px] mr-2 shrink-0">
           Rating Scale:
         </span>
@@ -352,20 +465,29 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
       <div
         ref={containerRef}
         id="timetable-grid-scroll-area"
-        className="flex-1 overflow-x-auto overflow-y-auto relative scroll-smooth bg-[#0d0c13]"
+        className="flex-1 overflow-x-auto overflow-y-auto relative scroll-smooth bg-[#0d0c13] select-none touch-pan-x touch-pan-y"
       >
         <div
-          className="min-w-[720px] flex flex-col relative"
-          style={{ height: `${totalTimelineHeight + 50}px` }}
+          className="flex flex-col relative"
+          style={{
+            minWidth: `${timeColWidth + displayedStages.length * stageColMinWidth}px`,
+            height: `${totalTimelineHeight + 50}px`,
+          }}
         >
           {/* Stage Headers (Sticky Top) */}
           <div className="sticky top-0 z-20 flex bg-[#161420]/95 backdrop-blur border-b border-[#262137] text-[#e2deec] text-xs font-semibold uppercase tracking-wider shadow-sm">
             {/* Time Column Header */}
-            <div className="w-16 shrink-0 py-2.5 px-2 text-center text-[10px] uppercase tracking-widest text-[#7c768e] font-bold border-r border-[#262137]">
+            <div
+              style={{ width: `${timeColWidth}px` }}
+              className="shrink-0 py-2.5 px-2 text-center text-[10px] uppercase tracking-widest text-[#7c768e] font-bold border-r border-[#262137]"
+            >
               Time
             </div>
             {/* Stage Columns */}
-            <div className="flex-1 grid" style={{ gridTemplateColumns: `repeat(${displayedStages.length}, minmax(160px, 1fr))` }}>
+            <div
+              className="flex-1 grid"
+              style={{ gridTemplateColumns: `repeat(${displayedStages.length}, minmax(${stageColMinWidth}px, 1fr))` }}
+            >
               {displayedStages.map((stage, sIdx) => (
                 <div
                   key={stage}
@@ -380,7 +502,10 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
           {/* Grid Canvas */}
           <div className="flex-1 flex relative">
             {/* Left Time Axis */}
-            <div className="w-16 shrink-0 relative border-r border-[#262137] select-none bg-[#12101a]/80">
+            <div
+              style={{ width: `${timeColWidth}px` }}
+              className="shrink-0 relative border-r border-[#262137] select-none bg-[#12101a]/80"
+            >
               {hourSlots.map((slot, index) => (
                 <div
                   key={slot.hour}
@@ -395,7 +520,7 @@ export const TimetableGrid: React.FC<TimetableGridProps> = ({
             {/* Stage Columns Canvas */}
             <div
               className="flex-1 grid relative"
-              style={{ gridTemplateColumns: `repeat(${displayedStages.length}, minmax(160px, 1fr))` }}
+              style={{ gridTemplateColumns: `repeat(${displayedStages.length}, minmax(${stageColMinWidth}px, 1fr))` }}
             >
               {/* Horizontal Hour Grid Lines */}
               {hourSlots.map((slot, index) => (

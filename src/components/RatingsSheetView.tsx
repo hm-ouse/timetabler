@@ -9,6 +9,7 @@ import {
   Plus,
   Scale,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 import { UserRating, FestivalData, MatchedScheduleItem } from '../types';
 
@@ -40,6 +41,15 @@ export const RatingsSheetView: React.FC<RatingsSheetViewProps> = ({
   const unratedCount = useMemo(() => {
     return ratings.filter((r) => !r.isRated).length;
   }, [ratings]);
+
+  const timetableUnratedActs = useMemo(() => {
+    const unratedSets = matchedItems.filter((m) => !m.isRated);
+    const unique = new Set<string>();
+    unratedSets.forEach((s) => unique.add(s.set.artist));
+    return unique.size;
+  }, [matchedItems]);
+
+  const totalUnratedAlertCount = Math.max(unratedCount, timetableUnratedActs);
 
   const filteredRatings = useMemo(() => {
     return ratings.filter((r) => {
@@ -84,15 +94,60 @@ export const RatingsSheetView: React.FC<RatingsSheetViewProps> = ({
           </div>
         </div>
 
-        <button
-          id="btn-edit-import-ratings"
-          type="button"
-          onClick={onOpenSheetModal}
-          className="px-3 py-1.5 bg-[#262137] hover:bg-[#312a47] text-white hover:text-emerald-200 border border-[#362f4e] rounded-xl text-xs font-bold transition"
-        >
-          Edit / Re-import Google Sheet
-        </button>
+        <div className="flex items-center gap-2">
+          {totalUnratedAlertCount > 0 && (
+            <button
+              id="ratings-unrated-alert-chip"
+              type="button"
+              onClick={() => setTierFilter('unrated')}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 border border-amber-500/45 hover:bg-amber-500/30 text-amber-200 rounded-xl text-xs font-bold cursor-pointer transition shadow-sm"
+              title="Filter by unrated artists"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>{totalUnratedAlertCount} Unrated Acts</span>
+            </button>
+          )}
+
+          <button
+            id="btn-edit-import-ratings"
+            type="button"
+            onClick={onOpenSheetModal}
+            className="px-3 py-1.5 bg-[#262137] hover:bg-[#312a47] text-white hover:text-emerald-200 border border-[#362f4e] rounded-xl text-xs font-bold transition"
+          >
+            Edit / Re-import Google Sheet
+          </button>
+        </div>
       </div>
+
+      {/* Unrated Acts Alert Warning Banner */}
+      {totalUnratedAlertCount > 0 && (
+        <div
+          id="ratings-sheet-unrated-alert-banner"
+          className="flex items-center justify-between gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+            </div>
+            <div>
+              <span className="font-bold text-amber-200">
+                {totalUnratedAlertCount} {totalUnratedAlertCount === 1 ? 'Act' : 'Acts'} Need Attention:{' '}
+              </span>
+              <span className="text-amber-300/80">
+                You have unrated artists playing at the festival. Rate them or add notes to ensure they get prioritized accurately.
+              </span>
+            </div>
+          </div>
+          <button
+            id="btn-filter-unrated-alert"
+            type="button"
+            onClick={() => setTierFilter('unrated')}
+            className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-lg font-bold text-xs shrink-0 whitespace-nowrap transition"
+          >
+            View Unrated
+          </button>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -108,26 +163,29 @@ export const RatingsSheetView: React.FC<RatingsSheetViewProps> = ({
         </div>
 
         {/* Tier filter tabs */}
-        <div className="flex items-center gap-1 bg-[#100e18] p-1 rounded-xl border border-[#252136] text-xs overflow-x-auto">
+        <div className="flex items-center gap-1 bg-[#100e18] p-1 rounded-xl border border-[#252136] text-xs overflow-x-auto no-scrollbar max-w-full">
           {[
             { id: 'all', label: 'All' },
             { id: 'playing', label: `Playing at Festival` },
             { id: 'must_see', label: 'Must-See (85%+)' },
             { id: 'recommended', label: 'Recommended (70%+)' },
             { id: 'medium', label: 'Medium (50%+)' },
-            { id: 'unrated', label: `Unrated (${unratedCount})` },
+            { id: 'unrated', label: `Unrated (${unratedCount})`, hasAlert: unratedCount > 0 },
           ].map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setTierFilter(tab.id as any)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 whitespace-nowrap ${
                 tierFilter === tab.id
                   ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
+                  : tab.hasAlert
+                  ? 'text-amber-300 hover:text-amber-200 bg-amber-500/10 border border-amber-500/20'
                   : 'text-[#9d97b0] hover:text-[#e2deec]'
               }`}
             >
-              {tab.label}
+              {tab.hasAlert && <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />}
+              <span>{tab.label}</span>
             </button>
           ))}
         </div>

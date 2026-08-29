@@ -593,6 +593,39 @@ export const App: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Unrated Acts Alert Chip with Yellow Warning Triangle */}
+                {festivalStats.unratedSlots > 0 && (
+                  <div
+                    id="sidebar-unrated-alert"
+                    className="flex items-center justify-between gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="text-xs font-semibold truncate">
+                        {festivalStats.unratedSlots} unrated {festivalStats.unratedSlots === 1 ? 'act' : 'acts'} on timetable
+                      </span>
+                    </div>
+                    <button
+                      id="btn-toggle-show-unrated"
+                      type="button"
+                      onClick={() =>
+                        setFilterSettings((prev) => ({
+                          ...prev,
+                          showUnrated: !prev.showUnrated,
+                        }))
+                      }
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded border transition shrink-0 ${
+                        filterSettings.showUnrated
+                          ? 'bg-amber-500/20 text-amber-200 border-amber-500/40 hover:bg-amber-500/30'
+                          : 'bg-[#12101a] text-[#8e88a3] border-[#262137] line-through'
+                      }`}
+                      title="Toggle showing unrated acts on timetable"
+                    >
+                      {filterSettings.showUnrated ? 'Shown' : 'Hidden'}
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-1.5 pt-0.5">
                   <button
                     id="btn-sidebar-setup-ratings"
@@ -761,14 +794,17 @@ export const App: React.FC = () => {
                   )}
 
                   {sheetStats.unrated > 0 && (
-                    <div className="bg-[#1e1b2b]/90 p-2.5 rounded-xl border border-[#2d283e]/60">
+                    <div className="bg-[#1e1b2b]/90 p-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5">
                       <div className="flex justify-between text-xs mb-1.5">
-                        <span className="text-[#b5b0c4] font-medium">Unrated / Notes Only</span>
-                        <span className="font-mono font-bold text-[#8e88a3]">{sheetStats.unrated}</span>
+                        <span className="text-amber-300 font-medium flex items-center gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          Unrated / Notes Only
+                        </span>
+                        <span className="font-mono font-bold text-amber-400">{sheetStats.unrated}</span>
                       </div>
                       <div className="w-full bg-[#13111c] h-1.5 rounded-full overflow-hidden">
                         <div
-                          className="bg-[#38334d] h-full rounded-full transition-all duration-300"
+                          className="bg-amber-500 h-full rounded-full transition-all duration-300"
                           style={{
                             width: `${Math.min(100, Math.round((sheetStats.unrated / Math.max(1, sheetStats.total)) * 100))}%`,
                           }}
@@ -827,14 +863,17 @@ export const App: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="bg-[#1e1b2b]/90 p-2.5 rounded-xl border border-[#2d283e]/60">
+                  <div className="bg-[#1e1b2b]/90 p-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5">
                     <div className="flex justify-between text-xs mb-1.5">
-                      <span className="text-[#b5b0c4] font-medium">Unrated Festival Slots</span>
-                      <span className="font-mono font-bold text-[#8e88a3]">{festivalStats.unratedSlots}</span>
+                      <span className="text-amber-300 font-medium flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        Unrated Festival Slots
+                      </span>
+                      <span className="font-mono font-bold text-amber-400">{festivalStats.unratedSlots}</span>
                     </div>
                     <div className="w-full bg-[#13111c] h-1.5 rounded-full overflow-hidden">
                       <div
-                        className="bg-[#38334d] h-full rounded-full transition-all duration-300"
+                        className="bg-amber-500 h-full rounded-full transition-all duration-300"
                         style={{
                           width: `${Math.min(100, Math.round((festivalStats.unratedSlots / Math.max(1, festivalStats.totalSets)) * 100))}%`,
                         }}
@@ -897,20 +936,23 @@ export const App: React.FC = () => {
         {/* Right Side: Main Timetable Canvas */}
         <div className="flex-1 flex flex-col gap-3 min-w-0">
           {/* High-Density Toolbar: Tabs, Score Slider, and Search */}
-          <section id="planner-toolbar" className="p-3 bg-[#161420] border border-[#2a253d]/80 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-md">
+          <section
+            id="planner-toolbar"
+            className="p-2 sm:p-3 bg-[#161420] border border-[#2a253d]/80 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3 shadow-md w-full min-w-0 box-border overflow-hidden"
+          >
             {/* View Tabs */}
-            <div className="flex items-center gap-1 bg-[#100e18] p-1 rounded-xl border border-[#252136] text-xs">
+            <div className="w-full lg:w-auto min-w-0 overflow-x-auto no-scrollbar flex items-center gap-1 bg-[#100e18] p-1 rounded-xl border border-[#252136] text-xs box-border">
               <button
                 id="view-tab-grid"
                 type="button"
                 onClick={() => setFilterSettings((prev) => ({ ...prev, activeView: 'grid' }))}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold text-xs transition shrink-0 whitespace-nowrap ${
                   filterSettings.activeView === 'grid'
                     ? 'bg-emerald-500 text-slate-950 shadow font-bold'
                     : 'text-[#9d97b0] hover:text-[#e2deec]'
                 }`}
               >
-                <Grid className="w-3.5 h-3.5" />
+                <Grid className="w-3.5 h-3.5 shrink-0" />
                 <span>Timetable Grid</span>
               </button>
 
@@ -918,13 +960,13 @@ export const App: React.FC = () => {
                 id="view-tab-list"
                 type="button"
                 onClick={() => setFilterSettings((prev) => ({ ...prev, activeView: 'list' }))}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold text-xs transition shrink-0 whitespace-nowrap ${
                   filterSettings.activeView === 'list'
                     ? 'bg-emerald-500 text-slate-950 shadow font-bold'
                     : 'text-[#9d97b0] hover:text-[#e2deec]'
                 }`}
               >
-                <List className="w-3.5 h-3.5" />
+                <List className="w-3.5 h-3.5 shrink-0" />
                 <span>Timeline List</span>
               </button>
 
@@ -932,16 +974,16 @@ export const App: React.FC = () => {
                 id="view-tab-clashes"
                 type="button"
                 onClick={() => setFilterSettings((prev) => ({ ...prev, activeView: 'clashes' }))}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold text-xs transition shrink-0 whitespace-nowrap ${
                   filterSettings.activeView === 'clashes'
                     ? 'bg-rose-600 text-white shadow font-bold'
                     : 'text-[#9d97b0] hover:text-[#e2deec]'
                 }`}
               >
-                <AlertTriangle className="w-3.5 h-3.5" />
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span>Clash Inspector</span>
                 {stats.clashes > 0 && (
-                  <span className="px-1.5 py-0.2 bg-rose-950 text-rose-300 rounded text-[10px] font-mono border border-rose-800/60">
+                  <span className="px-1.5 py-0.2 bg-rose-950 text-rose-300 rounded text-[10px] font-mono border border-rose-800/60 shrink-0">
                     {stats.clashes}
                   </span>
                 )}
@@ -951,46 +993,31 @@ export const App: React.FC = () => {
                 id="view-tab-ratings"
                 type="button"
                 onClick={() => setFilterSettings((prev) => ({ ...prev, activeView: 'ratings' }))}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold text-xs transition shrink-0 whitespace-nowrap ${
                   filterSettings.activeView === 'ratings'
                     ? 'bg-emerald-600 text-white shadow font-bold'
                     : 'text-[#9d97b0] hover:text-[#e2deec]'
                 }`}
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
                 <span>Ratings Sheet ({ratings.length})</span>
+                {festivalStats.unratedSlots > 0 && (
+                  <span
+                    className="flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/35 shrink-0"
+                    title={`${festivalStats.unratedSlots} unrated acts on timetable`}
+                  >
+                    <AlertTriangle className="w-2.5 h-2.5 text-amber-400" />
+                    <span>{festivalStats.unratedSlots}</span>
+                  </span>
+                )}
               </button>
             </div>
 
             {/* Right Toolbar Controls: Score Slider & Search */}
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              {/* Toggle Unrated Bands */}
-              <button
-                id="btn-toggle-show-unrated"
-                type="button"
-                onClick={() =>
-                  setFilterSettings((prev) => ({
-                    ...prev,
-                    showUnrated: !prev.showUnrated,
-                  }))
-                }
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs border transition ${
-                  filterSettings.showUnrated
-                    ? 'bg-[#1e1b2b] border-[#312c44] text-[#e2deec] hover:bg-[#252236]'
-                    : 'bg-[#14121d] border-[#221f30] text-[#7c768e] line-through opacity-70'
-                }`}
-                title="Toggle unrated acts on the timetable"
-              >
-                <Sparkles className={`w-3.5 h-3.5 ${filterSettings.showUnrated ? 'text-amber-400' : 'text-[#7c768e]'}`} />
-                <span>Unrated Acts</span>
-                <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-[#100e18] text-[#8e88a3] border border-[#272338]">
-                  {festivalStats.unratedSlots}
-                </span>
-              </button>
-
-              {/* Rating Filter Slider */}
-              <div className="flex items-center gap-2 bg-[#100e18] px-3 py-1.5 rounded-xl border border-[#252136] text-xs">
-                <span className="text-[#9d97b0] font-medium text-[11px] uppercase tracking-wider">Min Score:</span>
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full lg:w-auto justify-between lg:justify-end min-w-0">
+              {/* Rating Filter Slider - Enlarged for easy touch, high visibility, and precise control */}
+              <div className="flex items-center gap-2.5 sm:gap-3 bg-[#100e18] px-3.5 py-2.5 sm:px-4 sm:py-3 rounded-xl border border-[#252136] text-xs sm:text-sm grow sm:grow-0 shadow-inner">
+                <span className="text-[#d0cbdc] font-bold text-xs sm:text-sm whitespace-nowrap">Min Score:</span>
                 <input
                   id="slider-min-score"
                   type="range"
@@ -1004,16 +1031,16 @@ export const App: React.FC = () => {
                       minScorePercent: Number(e.target.value),
                     }))
                   }
-                  className="w-20 sm:w-24 accent-emerald-500 cursor-pointer"
+                  className="w-32 sm:w-48 md:w-56 h-3 sm:h-3.5 accent-emerald-400 bg-[#252136] rounded-lg cursor-pointer transition hover:bg-[#302a45]"
                 />
-                <span className="font-mono font-bold text-emerald-400 min-w-[36px] text-xs">
+                <span className="font-mono font-black text-sm sm:text-base text-emerald-300 bg-emerald-500/15 px-2.5 py-0.5 rounded-lg border border-emerald-500/25 min-w-[54px] text-center shrink-0">
                   ≥{filterSettings.minScorePercent}%
                 </span>
               </div>
 
               {/* Search Input */}
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-[#7c768e] absolute left-2.5 top-2.5" />
+              <div className="relative grow sm:grow-0">
+                <Search className="w-4 h-4 text-[#7c768e] absolute left-3 top-3 sm:top-3.5" />
                 <input
                   id="input-global-search"
                   type="text"
@@ -1025,7 +1052,7 @@ export const App: React.FC = () => {
                     }))
                   }
                   placeholder="Search act, stage, note..."
-                  className="bg-[#100e18] border border-[#252136] rounded-xl pl-8 pr-3 py-1.5 text-xs text-[#f1edf8] placeholder-[#6f6980] focus:outline-none focus:border-emerald-500/70 w-36 sm:w-48 transition"
+                  className="w-full sm:w-44 md:w-52 bg-[#100e18] border border-[#252136] rounded-xl pl-9 pr-3 py-2 text-xs sm:text-sm text-[#f1edf8] placeholder-[#6f6980] focus:outline-none focus:border-emerald-500/70 transition h-10 sm:h-11"
                 />
               </div>
             </div>

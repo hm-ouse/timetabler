@@ -46,6 +46,8 @@ export interface SheetParseResult {
   availableTabs?: SheetTabInfo[];
   sourceUrl?: string;
   sourceType?: 'google_sheet' | 'paste' | 'upload' | 'sample';
+  warning?: string;
+  error?: string;
 }
 
 export interface FestivalDay {

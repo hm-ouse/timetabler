@@ -15,9 +15,211 @@ import {
   User,
   Users,
   ChevronRight,
+  FileText,
 } from 'lucide-react';
 import { UserRating, SheetParseResult, RatingScaleType, SheetTabInfo } from '../types';
 import { parseSheetContent, parseExcelWorkbook } from '../utils/sheetParser';
+
+interface SafeFetchResult {
+  ok: boolean;
+  status: number;
+  data: any;
+  rawText: string;
+  isHtml: boolean;
+  error?: string;
+}
+
+async function safeFetchJson(url: string, options?: RequestInit): Promise<SafeFetchResult> {
+  try {
+    const response = await fetch(url, options);
+    const contentType = response.headers.get('content-type') || '';
+    const rawText = await response.text();
+    const trimmed = rawText.trim();
+    const lower = trimmed.toLowerCase();
+
+    // Check if body is HTML (e.g. login page, 404, or proxy error)
+    const isHtml =
+      contentType.includes('text/html') ||
+      lower.startsWith('<!doctype') ||
+      lower.startsWith('<html') ||
+      (trimmed.startsWith('<') && lower.includes('</html>'));
+
+    let data: any = null;
+    if (!isHtml && trimmed.length > 0) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        // Not valid JSON - safely ignored
+      }
+    }
+
+    const isLogin =
+      isHtml &&
+      (trimmed.includes('accounts.google.com') ||
+        trimmed.includes('ServiceLogin') ||
+        trimmed.includes('Sign in') ||
+        trimmed.includes('drive.google.com') ||
+        trimmed.includes('Access Denied'));
+
+    const isSuccess = response.ok && data !== null && !data.error && data.ok !== false;
+    const friendlyError =
+      data?.error ||
+      (isLogin
+        ? 'This Google Sheet is private or requires Google login. In Google Sheets, click "Share" (top-right) and set access to "Anyone with the link can view", or copy & paste the spreadsheet cells directly.'
+        : isHtml
+        ? 'Received an HTML webpage instead of spreadsheet data. Please ensure the Google Sheet link is shared with "Anyone with the link can view", or copy and paste the spreadsheet cells directly.'
+        : undefined);
+
+    return {
+      ok: isSuccess,
+      status: response.status,
+      data,
+      rawText,
+      isHtml,
+      error: friendlyError,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      rawText: '',
+      isHtml: false,
+      error: err.message || 'Request failed',
+    };
+  }
+}
+
+async function fetchGoogleSheetCsvClient(
+  url: string,
+  targetGid: string = '0',
+  sheetName?: string
+): Promise<{ csv: string; source: string; isHtml: boolean; isLogin: boolean; error?: string }> {
+  let cleanUrl = (url || '').trim().replace(/^["'<]+|["'>]+$/g, '');
+  const publishedMatch = cleanUrl.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
+  const standardMatch = cleanUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{15,})/);
+  const gidMatch = cleanUrl.match(/[#&?]gid=([0-9]+)/);
+  const effectiveGid = targetGid || (gidMatch ? gidMatch[1] : '0');
+
+  // Handle published Google Sheet links (/d/e/{ID}/pubhtml or /pub)
+  if (publishedMatch || cleanUrl.includes('/pubhtml') || cleanUrl.includes('/pub')) {
+    const pubUrls: string[] = [];
+    if (publishedMatch) {
+      pubUrls.push(
+        `https://docs.google.com/spreadsheets/d/e/${publishedMatch[1]}/pub?output=csv&gid=${effectiveGid}`
+      );
+    }
+    if (cleanUrl.includes('/pubhtml')) {
+      pubUrls.push(cleanUrl.replace('/pubhtml', `/pub?output=csv&gid=${effectiveGid}`));
+    } else if (cleanUrl.includes('/pub')) {
+      const base = cleanUrl.split('?')[0];
+      pubUrls.push(`${base}?output=csv&gid=${effectiveGid}`);
+    }
+
+    for (const pubCsvUrl of pubUrls) {
+      try {
+        const res = await fetch(pubCsvUrl);
+        if (res.ok) {
+          const text = await res.text();
+          const trimmed = text.trim();
+          const lower = trimmed.toLowerCase();
+          const isHtml =
+            lower.startsWith('<!doctype') ||
+            lower.startsWith('<html') ||
+            (trimmed.startsWith('<') && lower.includes('</html>'));
+          const isLogin =
+            isHtml &&
+            (trimmed.includes('accounts.google.com') ||
+              trimmed.includes('ServiceLogin') ||
+              trimmed.includes('Sign in') ||
+              trimmed.includes('drive.google.com') ||
+              trimmed.includes('Access Denied'));
+
+          if (!isHtml && trimmed.length > 0) {
+            return { csv: text, source: pubCsvUrl, isHtml: false, isLogin: false };
+          }
+          if (isLogin) {
+            return { csv: '', source: pubCsvUrl, isHtml: true, isLogin: true };
+          }
+        }
+      } catch (err: any) {
+        console.warn('Direct client pub fetch failed:', err);
+      }
+    }
+  }
+
+  if (!standardMatch) {
+    return {
+      csv: '',
+      source: cleanUrl,
+      isHtml: false,
+      isLogin: false,
+      error: 'Invalid Google Sheet URL. Please ensure it contains docs.google.com/spreadsheets/d/...',
+    };
+  }
+
+  const sheetId = standardMatch[1];
+  const candidateUrls: string[] = [];
+
+  if (sheetName && sheetName !== 'Main Sheet') {
+    candidateUrls.push(
+      `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`
+    );
+  }
+  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${effectiveGid}`);
+  candidateUrls.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${effectiveGid}`);
+
+  let lastError = '';
+  let encounteredHtml = false;
+  let encounteredLogin = false;
+
+  for (const directUrl of candidateUrls) {
+    try {
+      const res = await fetch(directUrl);
+      if (res.ok) {
+        const text = await res.text();
+        const trimmed = text.trim();
+        const lower = trimmed.toLowerCase();
+        const isHtml =
+          lower.startsWith('<!doctype') ||
+          lower.startsWith('<html') ||
+          (trimmed.startsWith('<') && lower.includes('</html>'));
+
+        if (isHtml) {
+          encounteredHtml = true;
+          if (
+            trimmed.includes('accounts.google.com') ||
+            trimmed.includes('ServiceLogin') ||
+            trimmed.includes('Sign in') ||
+            trimmed.includes('drive.google.com') ||
+            trimmed.includes('Access Denied')
+          ) {
+            encounteredLogin = true;
+          }
+          continue;
+        }
+
+        if (trimmed.length > 0) {
+          return { csv: text, source: directUrl, isHtml: false, isLogin: false };
+        }
+      } else {
+        lastError = `Google responded with status ${res.status}`;
+      }
+    } catch (err: any) {
+      lastError = err.message || 'Direct fetch failed';
+    }
+  }
+
+  return {
+    csv: '',
+    source: candidateUrls[0] || cleanUrl,
+    isHtml: encounteredHtml,
+    isLogin: encounteredLogin,
+    error: encounteredLogin
+      ? 'The Google Sheet is private or requires Google login.'
+      : lastError || 'Could not fetch spreadsheet data from Google Sheets.',
+  };
+}
 
 interface SheetManagerModalProps {
   isOpen: boolean;
@@ -102,10 +304,11 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
     handleFetchGoogleSheet(undefined, tab.gid, tab.name);
   };
 
-  // Handle Google Sheet URL fetch via server endpoint for a specific tab or default
+  // Handle Google Sheet URL fetch via server endpoint or client-side fallback
   const handleFetchGoogleSheet = async (e?: React.FormEvent, customGid?: string, customName?: string) => {
     if (e) e.preventDefault();
-    if (!googleSheetUrl.trim()) return;
+    const cleanUrl = googleSheetUrl.trim();
+    if (!cleanUrl) return;
 
     setLoading(true);
     setErrorMsg(null);
@@ -115,35 +318,77 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
     const targetName = customName !== undefined ? customName : selectedTabName;
 
     try {
-      const response = await fetch('/api/fetch-google-sheet', {
+      let csvContent = '';
+      let detectedTabs: SheetTabInfo[] = [];
+      let activeTabInfo: { gid?: string; name?: string } = { gid: targetGid, name: targetName || 'Main Sheet' };
+      let fetchedSuccessfully = false;
+
+      // 1. Try server backend endpoint first (with safe JSON parser to avoid "unexpected token <")
+      const serverResult = await safeFetchJson('/api/fetch-google-sheet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          url: googleSheetUrl,
+          url: cleanUrl,
           gid: targetGid,
           sheetName: targetName !== 'Main Sheet' ? targetName : undefined,
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch Google Sheet');
+      if (serverResult.ok && serverResult.data?.csv) {
+        const candidateCsv = serverResult.data.csv;
+        const isHtml =
+          candidateCsv.trim().startsWith('<!DOCTYPE') ||
+          candidateCsv.trim().startsWith('<html') ||
+          (candidateCsv.trim().startsWith('<') && candidateCsv.toLowerCase().includes('</html>'));
+
+        if (!isHtml) {
+          csvContent = candidateCsv;
+          fetchedSuccessfully = true;
+          if (serverResult.data.sheetsCsv) {
+            setGoogleSheetsMap(serverResult.data.sheetsCsv);
+          }
+          if (serverResult.data.availableTabs && serverResult.data.availableTabs.length > 0) {
+            detectedTabs = serverResult.data.availableTabs;
+          }
+          if (serverResult.data.activeTab) {
+            activeTabInfo = serverResult.data.activeTab;
+          }
+        }
       }
 
-      if (data.sheetsCsv) {
-        setGoogleSheetsMap(data.sheetsCsv);
+      // 2. If server endpoint failed, returned HTML, or is unavailable, fallback to client-side direct fetch!
+      if (!fetchedSuccessfully) {
+        const clientResult = await fetchGoogleSheetCsvClient(cleanUrl, targetGid, targetName);
+        if (clientResult.csv && !clientResult.isHtml) {
+          csvContent = clientResult.csv;
+          fetchedSuccessfully = true;
+        } else if (
+          clientResult.isLogin ||
+          (serverResult.data?.error && serverResult.data.error.includes('private')) ||
+          (serverResult.data?.error && serverResult.data.error.includes('login'))
+        ) {
+          throw new Error(
+            'This Google Sheet is private or requires Google login. In Google Sheets, click "Share" (top-right), set access to "Anyone with the link can view", or copy the sheet cells and paste them into the "Paste Sheet" tab.'
+          );
+        } else if (serverResult.data?.error) {
+          throw new Error(serverResult.data.error);
+        } else if (clientResult.error) {
+          throw new Error(clientResult.error);
+        } else {
+          throw new Error(
+            'Could not load spreadsheet data. Make sure the Google Sheet is shared with "Anyone with the link can view", or copy & paste the cells directly.'
+          );
+        }
       }
 
-      const csvContent = data.csv;
+      // We have CSV content!
       setPastedText(csvContent);
 
-      const detectedTabs: SheetTabInfo[] =
-        data.availableTabs && data.availableTabs.length > 0
-          ? data.availableTabs
-          : [{ id: targetGid, name: targetName || 'Main Sheet', gid: targetGid, isDefault: true }];
+      if (detectedTabs.length === 0) {
+        detectedTabs = [{ id: targetGid, name: targetName || 'Main Sheet', gid: targetGid, isDefault: true }];
+      }
 
       setAvailableTabs(detectedTabs);
-      const activeTabInfo = data.activeTab || { gid: targetGid, name: targetName || 'Main Sheet' };
       setSelectedTabGid(activeTabInfo.gid || targetGid);
       setSelectedTabName(activeTabInfo.name || targetName);
 
@@ -151,28 +396,53 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
         activeTabName: activeTabInfo.name,
         activeTabGid: activeTabInfo.gid,
         availableTabs: detectedTabs,
-        sourceUrl: googleSheetUrl,
+        sourceUrl: cleanUrl,
         sourceType: 'google_sheet',
       });
+
+      if (parsed.error || parsed.warning) {
+        if (parsed.validRatingsCount === 0) {
+          setErrorMsg(parsed.error || parsed.warning || 'Could not detect ratings in sheet.');
+          setPreviewResult(parsed);
+          return;
+        }
+      }
 
       setPreviewResult(parsed);
       onUpdateRatings(parsed.ratings, parsed, csvContent);
 
       if (parsed.validRatingsCount > 0) {
         setSuccessMsg(
-          `Imported ${parsed.validRatingsCount} ratings from tab "${activeTabInfo.name}" (${detectedTabs.length} tabs found: ${detectedTabs.map((t) => t.name).join(', ')})`
+          `Imported ${parsed.validRatingsCount} ratings from "${activeTabInfo.name}" (${detectedTabs.length} tabs found: ${detectedTabs.map((t) => t.name).join(', ')})`
         );
       } else {
-        // If 0 ratings in this tab, check if another tab has ratings to inform user
         const otherTabs = detectedTabs.filter((t) => t.name !== activeTabInfo.name);
         setSuccessMsg(
           `Loaded tab "${activeTabInfo.name}" (${parsed.totalRows} rows). ${
-            otherTabs.length > 0 ? `Available tabs: ${detectedTabs.map((t) => t.name).join(', ')} — click any tab below to switch!` : ''
+            otherTabs.length > 0
+              ? `Available tabs: ${detectedTabs.map((t) => t.name).join(', ')} — click any tab below to switch!`
+              : 'Tip: Ensure the sheet has artist names and rating columns.'
           }`
         );
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Could not fetch Google Sheet. Please check the share permissions or copy & paste the data.');
+      const msg = err.message || '';
+      if (
+        msg.includes('Unexpected token') ||
+        msg.includes('is not valid JSON') ||
+        msg.includes('<html>') ||
+        msg.includes('<!DOCTYPE') ||
+        msg.includes('HTML page')
+      ) {
+        setErrorMsg(
+          'Could not load data from Google Sheets: the sheet may be private or protected. In Google Sheets, click "Share" (top-right) and set access to "Anyone with the link can view", or copy and paste the spreadsheet cells into the "Paste Sheet" tab.'
+        );
+      } else {
+        setErrorMsg(
+          msg ||
+            'Could not fetch Google Sheet. Please check that the sheet is shared with "Anyone with the link can view", or copy and paste the spreadsheet cells directly.'
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -180,37 +450,43 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
 
   // Inspect Google Sheet Tabs without downloading full content
   const handleDiscoverGoogleSheetTabs = async () => {
-    if (!googleSheetUrl.trim()) return;
+    const cleanUrl = googleSheetUrl.trim();
+    if (!cleanUrl) return;
     setLoading(true);
     setErrorMsg(null);
 
     try {
-      const response = await fetch('/api/list-google-sheet-tabs', {
+      const serverResult = await safeFetchJson('/api/list-google-sheet-tabs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: googleSheetUrl }),
+        body: JSON.stringify({ url: cleanUrl }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Could not discover Google Sheet tabs');
+      if (serverResult.ok && serverResult.data) {
+        const data = serverResult.data;
+        if (data.sheetsCsv) {
+          setGoogleSheetsMap(data.sheetsCsv);
+        }
+
+        if (data.tabs && data.tabs.length > 0) {
+          setAvailableTabs(data.tabs);
+          setSuccessMsg(
+            `Discovered ${data.tabs.length} tabs in "${data.title || 'Google Sheet'}": ${data.tabs
+              .map((t: SheetTabInfo) => `"${t.name}"`)
+              .join(', ')}. Click a tab below to switch!`
+          );
+          return;
+        }
       }
 
-      if (data.sheetsCsv) {
-        setGoogleSheetsMap(data.sheetsCsv);
-      }
-
-      if (data.tabs && data.tabs.length > 0) {
-        setAvailableTabs(data.tabs);
-        setSuccessMsg(
-          `Discovered ${data.tabs.length} tabs in "${data.title || 'Google Sheet'}": ${data.tabs.map((t: SheetTabInfo) => `"${t.name}"`).join(', ')}. Click a tab below to switch!`
-        );
+      if (serverResult.data?.error) {
+        setErrorMsg(serverResult.data.error);
       } else {
-        setErrorMsg('No additional tabs found in this sheet.');
+        // Fallback to active sheet import
+        await handleFetchGoogleSheet();
       }
-    } catch (err: any) {
-      // Non-fatal, try direct fetch
-      handleFetchGoogleSheet();
+    } catch {
+      await handleFetchGoogleSheet();
     } finally {
       setLoading(false);
     }
@@ -218,11 +494,20 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
 
   // Handle Pasted Text parse
   const handleParsePastedText = () => {
-    if (!pastedText.trim()) {
+    const raw = pastedText.trim();
+    if (!raw) {
       setErrorMsg('Please paste spreadsheet cells or CSV content.');
       return;
     }
     setErrorMsg(null);
+
+    // If user pasted a Google Sheet link into the paste box, redirect smoothly
+    if (raw.includes('docs.google.com/spreadsheets')) {
+      setGoogleSheetUrl(raw);
+      setActiveTab('google_sheet');
+      return;
+    }
+
     const parsed = parseSheetContent(pastedText, scaleOverride, {
       activeTabName: 'Pasted Sheet',
       sourceType: 'paste',
