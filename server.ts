@@ -41,8 +41,10 @@ app.get('/api/health', (req, res) => {
 /**
  * Robust Google Sheet URL parser supporting:
  * - Standard edit URLs: https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid={GID}
+ * - Profile URLs: https://docs.google.com/spreadsheets/u/0/d/{SHEET_ID}/edit#gid={GID}
  * - Published URLs: https://docs.google.com/spreadsheets/d/e/{PUBLISHED_ID}/pubhtml
  * - Direct export URLs: https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv
+ * - Google Drive file URLs: https://drive.google.com/file/d/{SHEET_ID}/view
  * - URLs wrapped in quotes or angle brackets
  */
 function parseGoogleSheetUrl(rawUrl: string): {
@@ -60,8 +62,8 @@ function parseGoogleSheetUrl(rawUrl: string): {
   const gidMatch = cleanUrl.match(/[#&?]gid=([0-9]+)/);
   const gid = gidMatch ? gidMatch[1] : undefined;
 
-  // 1. Published sheet: /spreadsheets/d/e/{ID}/...
-  const publishedMatch = cleanUrl.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
+  // 1. Published sheet: /d/e/{ID}
+  const publishedMatch = cleanUrl.match(/\/d\/e\/([a-zA-Z0-9-_]+)/);
   if (publishedMatch) {
     return {
       isGoogleSheet: true,
@@ -72,8 +74,8 @@ function parseGoogleSheetUrl(rawUrl: string): {
     };
   }
 
-  // 2. Standard spreadsheet ID (minimum 15 characters, avoids matching 'e')
-  const standardMatch = cleanUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{15,})/);
+  // 2. Standard spreadsheet ID (at least 15 characters, avoids matching 'e')
+  const standardMatch = cleanUrl.match(/\/d\/(?!e\/)([a-zA-Z0-9-_]{15,})/);
   if (standardMatch) {
     return {
       isGoogleSheet: true,
@@ -85,7 +87,7 @@ function parseGoogleSheetUrl(rawUrl: string): {
   }
 
   // 3. Fallback check for docs.google.com
-  const isGoogleSheet = cleanUrl.includes('docs.google.com/spreadsheets');
+  const isGoogleSheet = cleanUrl.includes('docs.google.com/spreadsheets') || cleanUrl.includes('drive.google.com');
   const isPublished = cleanUrl.includes('/pubhtml') || cleanUrl.includes('/pub');
 
   return {
@@ -94,6 +96,29 @@ function parseGoogleSheetUrl(rawUrl: string): {
     gid,
     cleanUrl,
   };
+}
+
+/**
+ * Helper to decode Google HTML / JS escaped strings (e.g. \x27, \x22, \uXXXX, &amp;, &#39;)
+ */
+function decodeGoogleEscapedString(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/\\x27/g, "'")
+    .replace(/\\x22/g, '"')
+    .replace(/\\x26/g, '&')
+    .replace(/\\x3d/g, '=')
+    .replace(/\\x2f/g, '/')
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\'/g, "'")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
 }
 
 /**
@@ -119,10 +144,123 @@ function inspectHtmlContent(text: string): { isHtml: boolean; isLogin: boolean }
 }
 
 /**
- * Helper to discover all tabs / worksheets in a public/shared Google Spreadsheet
- * Fetches the entire workbook via the XLSX export API for 100% accurate tab names & contents.
+ * Helper to extract tabs from Google Sheets HTML (htmlview, pubhtml, or edit page)
  */
-async function inspectGoogleSheetTabs(sheetId: string, requestedGid?: string): Promise<{
+function extractTabsFromGoogleHtml(
+  html: string,
+  requestedGid?: string
+): Array<{ id: string; name: string; gid: string; isDefault: boolean }> {
+  const tabsList: Array<{ id: string; name: string; gid: string; isDefault: boolean }> = [];
+  const seenNames = new Set<string>();
+  const seenGids = new Set<string>();
+
+  const addTab = (name: string, gid: string) => {
+    const cleanName = decodeGoogleEscapedString(name).trim();
+    const cleanGid = (gid || '').trim();
+    if (
+      !cleanName ||
+      cleanName.length === 0 ||
+      seenNames.has(cleanName.toLowerCase()) ||
+      cleanName.toLowerCase().includes('google') ||
+      cleanName.toLowerCase().includes('report abuse') ||
+      cleanName.toLowerCase().includes('drive')
+    ) {
+      return;
+    }
+    seenNames.add(cleanName.toLowerCase());
+    if (cleanGid) seenGids.add(cleanGid);
+    const effectiveGid = cleanGid || String(tabsList.length);
+    tabsList.push({
+      id: effectiveGid,
+      gid: effectiveGid,
+      name: cleanName,
+      isDefault:
+        requestedGid !== undefined
+          ? effectiveGid === requestedGid
+          : tabsList.length === 0 || effectiveGid === '0',
+    });
+  };
+
+  // Pattern A: items.push({name: "...", pageUrl: "...", gid: "..."})
+  const itemRegex = /items\.push\(\s*\{([\s\S]*?)\}\s*\);?/g;
+  let match;
+  while ((match = itemRegex.exec(html)) !== null) {
+    const block = match[1];
+    const nameMatch = block.match(/name:\s*["']((?:\\.|[^"'\\])*)["']/);
+    const gidMatch =
+      block.match(/gid:\s*["']?([0-9]+)["']?/) ||
+      block.match(/[?&]gid(?:\\x3d|=)([0-9]+)/);
+    if (nameMatch) {
+      addTab(nameMatch[1], gidMatch ? gidMatch[1] : '');
+    }
+  }
+
+  // Pattern B: var items = [{name: "..."}, ...]
+  const itemsArrayMatch = html.match(/var\s+items\s*=\s*(\[\s*\{[\s\S]*?\}\s*\]);/);
+  if (itemsArrayMatch && tabsList.length === 0) {
+    const objRegex = /\{([^{}]+)\}/g;
+    let m2;
+    while ((m2 = objRegex.exec(itemsArrayMatch[1])) !== null) {
+      const block = m2[1];
+      const nameMatch = block.match(/name:\s*["']((?:\\.|[^"'\\])*)["']/);
+      const gidMatch =
+        block.match(/gid:\s*["']?([0-9]+)["']?/) ||
+        block.match(/[?&]gid(?:\\x3d|=)([0-9]+)/);
+      if (nameMatch) {
+        addTab(nameMatch[1], gidMatch ? gidMatch[1] : '');
+      }
+    }
+  }
+
+  // Pattern C: <li id="sheet-button-123"><a ...>SheetName</a></li>
+  const liRegex = /<li[^>]*id=["']sheet-button-([0-9]+)["'][^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/gi;
+  let liMatch;
+  while ((liMatch = liRegex.exec(html)) !== null) {
+    const gid = liMatch[1];
+    const rawName = liMatch[2].replace(/<[^>]+>/g, '').trim();
+    if (gid && rawName) {
+      addTab(rawName, gid);
+    }
+  }
+
+  // Pattern D: <div class="docs-sheet-tab-caption">SheetName</div>
+  const captionRegex = /class=["'][^"']*docs-sheet-tab-caption[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi;
+  let capMatch;
+  let capIndex = 0;
+  while ((capMatch = captionRegex.exec(html)) !== null) {
+    const rawName = capMatch[1].replace(/<[^>]+>/g, '').trim();
+    if (rawName) {
+      addTab(rawName, String(capIndex));
+      capIndex++;
+    }
+  }
+
+  // Pattern E: links with gid in pubhtml or preview: <a href="...gid=123...">SheetName</a>
+  const linkRegex = /<a[^>]+href=["'][^"']*[?&#]gid=([0-9]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let linkMatch;
+  while ((linkMatch = linkRegex.exec(html)) !== null) {
+    const gid = linkMatch[1];
+    const rawName = linkMatch[2].replace(/<[^>]+>/g, '').trim();
+    if (gid && rawName) {
+      addTab(rawName, gid);
+    }
+  }
+
+  return tabsList;
+}
+
+/**
+ * Helper to discover all tabs / worksheets in a Google Spreadsheet.
+ * Uses a multi-tiered approach:
+ * 1. XLSX workbook export (extracts all sheet names and full CSV content)
+ * 2. htmlview / pubhtml scraping (extracts sheet tabs, GIDs, and document title)
+ * 3. edit page HTML inspection (fallback for private-access detection or caption scraping)
+ */
+async function inspectGoogleSheetTabs(
+  id: string,
+  requestedGid?: string,
+  isPublished: boolean = false
+): Promise<{
   title: string;
   tabs: Array<{ id: string; name: string; gid: string; isDefault: boolean; rowCount?: number; csvContent?: string }>;
   sheetsCsv: Record<string, string>;
@@ -132,65 +270,99 @@ async function inspectGoogleSheetTabs(sheetId: string, requestedGid?: string): P
   const sheetsCsv: Record<string, string> = {};
   let docTitle = 'Google Spreadsheet';
 
-  // 1. Try XLSX export (most reliable for all sheet names, e.g. Home, H, K)
-  try {
-    const xlsxUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
-    const response = await fetch(xlsxUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
+  // 1. Try XLSX export for standard sheets (most accurate for names & full content of all tabs)
+  if (!isPublished) {
+    try {
+      const xlsxUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`;
+      const response = await fetch(xlsxUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+        redirect: 'follow',
+      });
 
-    if (response.ok) {
-      const buffer = await response.arrayBuffer();
-      if (buffer && buffer.byteLength > 500) {
-        // Validate it is not an HTML login page returned with 200
-        const prefix = new TextDecoder().decode(buffer.slice(0, 150)).trim().toLowerCase();
-        if (prefix.startsWith('<!doctype') || prefix.startsWith('<html')) {
-          const fullText = new TextDecoder().decode(buffer);
-          const { isLogin } = inspectHtmlContent(fullText);
-          if (isLogin) {
-            return { title: docTitle, tabs: [], sheetsCsv: {}, isPrivate: true };
-          }
-        } else {
-          const workbook = XLSX.read(buffer, { type: 'array' });
-          const sheetNames = workbook.SheetNames || [];
+      if (response.ok) {
+        const buffer = await response.arrayBuffer();
+        if (buffer && buffer.byteLength > 500) {
+          const prefix = new TextDecoder().decode(buffer.slice(0, 150)).trim().toLowerCase();
+          if (prefix.startsWith('<!doctype') || prefix.startsWith('<html')) {
+            const fullText = new TextDecoder().decode(buffer);
+            const { isLogin } = inspectHtmlContent(fullText);
+            if (isLogin) {
+              return { title: docTitle, tabs: [], sheetsCsv: {}, isPrivate: true };
+            }
+          } else {
+            const workbook = XLSX.read(buffer, { type: 'array' });
+            const sheetNames = workbook.SheetNames || [];
 
-          if (sheetNames.length > 0) {
-            sheetNames.forEach((name, idx) => {
-              const ws = workbook.Sheets[name];
-              const csv = XLSX.utils.sheet_to_csv(ws);
-              sheetsCsv[name] = csv;
-              const rowCount = csv.split('\n').filter((r) => r.trim().length > 0).length;
+            if (sheetNames.length > 0) {
+              // Also query htmlview quickly to resolve exact Google GIDs and document title
+              const htmlGidMap = new Map<string, string>();
+              try {
+                const htmlUrl = `https://docs.google.com/spreadsheets/d/${id}/htmlview`;
+                const htmlResp = await fetch(htmlUrl, {
+                  headers: {
+                    'User-Agent':
+                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  },
+                });
+                if (htmlResp.ok) {
+                  const html = await htmlResp.text();
+                  const titleMatch =
+                    html.match(/<meta property="og:title" content="([^"]+)">/) || html.match(/<title>([^<]+)<\/title>/);
+                  if (titleMatch && titleMatch[1]) {
+                    docTitle = titleMatch[1].replace(' - Google Sheets', '').replace(' - Google Drive', '').trim();
+                  }
+                  const htmlTabs = extractTabsFromGoogleHtml(html, requestedGid);
+                  htmlTabs.forEach((ht) => {
+                    htmlGidMap.set(ht.name.toLowerCase().trim(), ht.gid);
+                  });
+                }
+              } catch (e) {
+                console.warn('HTML title/gid enrichment failed:', e);
+              }
 
-              tabs.push({
-                id: `tab-${idx}`,
-                name,
-                gid: String(idx),
-                isDefault: idx === 0 || (requestedGid !== undefined && String(idx) === requestedGid),
-                rowCount,
-                csvContent: csv,
+              sheetNames.forEach((name, idx) => {
+                const ws = workbook.Sheets[name];
+                const csv = XLSX.utils.sheet_to_csv(ws);
+                sheetsCsv[name] = csv;
+                const rowCount = csv.split('\n').filter((r) => r.trim().length > 0).length;
+                const mappedGid = htmlGidMap.get(name.toLowerCase().trim()) || (idx === 0 ? '0' : String(idx));
+
+                tabs.push({
+                  id: mappedGid,
+                  name,
+                  gid: mappedGid,
+                  isDefault:
+                    requestedGid !== undefined
+                      ? mappedGid === requestedGid || String(idx) === requestedGid
+                      : idx === 0,
+                  rowCount,
+                  csvContent: csv,
+                });
               });
-            });
 
-            return {
-              title: docTitle,
-              tabs,
-              sheetsCsv,
-            };
+              return {
+                title: docTitle,
+                tabs,
+                sheetsCsv,
+              };
+            }
           }
         }
       }
+    } catch (err) {
+      console.warn('XLSX export fetch failed, falling back to HTML scrape:', err);
     }
-  } catch (err) {
-    console.warn('XLSX export fetch failed, falling back to HTML scrape:', err);
   }
 
-  // 2. Fallback: Scrape htmlview if XLSX export was blocked
-  const tabsMap = new Map<string, { id: string; name: string; gid: string; isDefault: boolean }>();
+  // 2. Fallback or Published: Scrape htmlview / pubhtml
   try {
-    const htmlUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`;
+    const htmlUrl = isPublished
+      ? `https://docs.google.com/spreadsheets/d/e/${id}/pubhtml`
+      : `https://docs.google.com/spreadsheets/d/${id}/htmlview`;
+
     const response = await fetch(htmlUrl, {
       headers: {
         'User-Agent':
@@ -205,42 +377,56 @@ async function inspectGoogleSheetTabs(sheetId: string, requestedGid?: string): P
         return { title: docTitle, tabs: [], sheetsCsv: {}, isPrivate: true };
       }
 
-      // Extract document title
       const titleMatch =
         html.match(/<meta property="og:title" content="([^"]+)">/) || html.match(/<title>([^<]+)<\/title>/);
       if (titleMatch && titleMatch[1]) {
         docTitle = titleMatch[1].replace(' - Google Sheets', '').replace(' - Google Drive', '').trim();
       }
 
-      // Pattern: <li id="sheet-button-12345"><a ...>SheetName</a></li>
-      const liRegex = /<li[^>]*id=["']sheet-button-([0-9]+)["'][^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/gi;
-      let liMatch;
-      while ((liMatch = liRegex.exec(html)) !== null) {
-        const gid = liMatch[1];
-        const rawName = liMatch[2].replace(/<[^>]+>/g, '').trim();
-        if (gid && rawName && !tabsMap.has(gid)) {
-          tabsMap.set(gid, {
-            id: gid,
-            gid,
-            name: rawName,
-            isDefault: gid === '0' || gid === requestedGid,
-          });
-        }
+      const parsedTabs = extractTabsFromGoogleHtml(html, requestedGid);
+      if (parsedTabs.length > 0) {
+        return {
+          title: docTitle,
+          tabs: parsedTabs,
+          sheetsCsv,
+        };
       }
     }
   } catch (err) {
-    console.warn('Could not scrape tabs from htmlview:', err);
+    console.warn('Could not scrape tabs from htmlview/pubhtml:', err);
   }
 
-  if (tabsMap.size > 0) {
-    return {
-      title: docTitle,
-      tabs: Array.from(tabsMap.values()),
-      sheetsCsv,
-    };
+  // 3. Fallback: Check edit page if standard sheet
+  if (!isPublished) {
+    try {
+      const editUrl = `https://docs.google.com/spreadsheets/d/${id}/edit`;
+      const editResp = await fetch(editUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
+      if (editResp.ok) {
+        const editHtml = await editResp.text();
+        const { isLogin } = inspectHtmlContent(editHtml);
+        if (isLogin) {
+          return { title: docTitle, tabs: [], sheetsCsv: {}, isPrivate: true };
+        }
+        const editTabs = extractTabsFromGoogleHtml(editHtml, requestedGid);
+        if (editTabs.length > 0) {
+          return {
+            title: docTitle,
+            tabs: editTabs,
+            sheetsCsv,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Could not inspect edit page:', err);
+    }
   }
 
-  // Final fallback
+  // 4. Default fallback: Single tab
   const defaultGid = requestedGid || '0';
   return {
     title: docTitle,
@@ -274,26 +460,19 @@ app.post('/api/list-google-sheet-tabs', async (req, res) => {
       });
     }
 
-    if (parsed.isPublished) {
-      // For published sheets, single tab or pubhtml scrape
-      return res.json({
-        ok: true,
-        sheetId: parsed.publishedId || 'published',
-        title: 'Published Google Sheet',
-        currentGid: parsed.gid || '0',
-        tabs: [{ id: '0', gid: parsed.gid || '0', name: 'Published Sheet', isDefault: true }],
-        sheetsCsv: {},
-      });
-    }
-
-    if (!parsed.sheetId) {
+    const targetId = parsed.sheetId || parsed.publishedId;
+    if (!targetId) {
       return res.status(200).json({
         ok: false,
         error: 'Could not extract Google Sheet ID from URL. Please check the link.',
       });
     }
 
-    const { title, tabs, sheetsCsv, isPrivate } = await inspectGoogleSheetTabs(parsed.sheetId, parsed.gid);
+    const { title, tabs, sheetsCsv, isPrivate } = await inspectGoogleSheetTabs(
+      targetId,
+      parsed.gid,
+      parsed.isPublished
+    );
 
     if (isPrivate) {
       return res.status(200).json({
@@ -306,7 +485,7 @@ app.post('/api/list-google-sheet-tabs', async (req, res) => {
 
     return res.json({
       ok: true,
-      sheetId: parsed.sheetId,
+      sheetId: targetId,
       title,
       currentGid: parsed.gid || (tabs[0] ? tabs[0].gid : '0'),
       tabs,
@@ -339,117 +518,83 @@ app.post('/api/fetch-google-sheet', async (req, res) => {
       });
     }
 
+    const targetId = parsed.sheetId || parsed.publishedId;
+    if (!targetId) {
+      return res.status(200).json({
+        ok: false,
+        error: 'Could not extract Google Sheet ID from URL. Please check the link.',
+      });
+    }
+
     const effectiveGid = customGid !== undefined ? String(customGid) : parsed.gid || '0';
 
-    // 1. If it's a published Google Sheet (/d/e/{ID}/pubhtml or /pub)
-    if (parsed.isPublished) {
-      const candidatePubUrls: string[] = [];
-      if (parsed.publishedId) {
-        candidatePubUrls.push(
-          `https://docs.google.com/spreadsheets/d/e/${parsed.publishedId}/pub?output=csv&gid=${effectiveGid}`
-        );
-      }
-      if (parsed.cleanUrl.includes('/pubhtml')) {
-        candidatePubUrls.push(parsed.cleanUrl.replace('/pubhtml', `/pub?output=csv&gid=${effectiveGid}`));
-      } else if (parsed.cleanUrl.includes('/pub')) {
-        const base = parsed.cleanUrl.split('?')[0];
-        candidatePubUrls.push(`${base}?output=csv&gid=${effectiveGid}`);
-      }
+    // 1. Discover all tabs and pre-cached CSVs
+    const { title, tabs, sheetsCsv, isPrivate } = await inspectGoogleSheetTabs(
+      targetId,
+      effectiveGid,
+      parsed.isPublished
+    );
 
-      for (const pubUrl of candidatePubUrls) {
-        try {
-          const resp = await fetch(pubUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              Accept: 'text/csv,text/plain,*/*',
-            },
-          });
-          if (resp.ok) {
-            const text = await resp.text();
-            const { isHtml, isLogin } = inspectHtmlContent(text);
-            if (!isHtml && text.trim().length > 0) {
-              const activeTab = {
-                id: effectiveGid,
-                gid: effectiveGid,
-                name: sheetName || 'Published Sheet',
-                isDefault: true,
-              };
-              return res.json({
-                ok: true,
-                csv: text,
-                source: pubUrl,
-                docTitle: 'Published Google Sheet',
-                activeTab,
-                availableTabs: [activeTab],
-              });
-            }
-            if (isLogin) {
-              return res.status(200).json({
-                ok: false,
-                isPrivate: true,
-                error:
-                  'This Google Sheet is private or requires Google login. In Google Sheets, click "Share" (top-right), set access to "Anyone with the link can view", or copy the sheet cells and paste them into the "Paste Sheet" tab.',
-              });
-            }
-          }
-        } catch (err) {
-          console.warn('Published sheet fetch attempt failed:', err);
-        }
-      }
+    if (isPrivate) {
+      return res.status(200).json({
+        ok: false,
+        isPrivate: true,
+        error:
+          'This Google Sheet is private or requires Google login. In Google Sheets, click "Share" (top-right), set access to "Anyone with the link can view", or copy the sheet cells and paste them into the "Paste Sheet" tab.',
+      });
     }
 
-    // 2. If standard Google Sheet ID exists, try XLSX tab extraction first
-    if (parsed.sheetId) {
-      const sheetId = parsed.sheetId;
-      const { title, tabs, sheetsCsv, isPrivate } = await inspectGoogleSheetTabs(sheetId, effectiveGid);
-
-      if (isPrivate) {
-        return res.status(200).json({
-          ok: false,
-          isPrivate: true,
-          error:
-            'This Google Sheet is private or requires Google login. In Google Sheets, click "Share" (top-right), set access to "Anyone with the link can view", or copy the sheet cells and paste them into the "Paste Sheet" tab.',
-        });
-      }
-
-      if (tabs.length > 0) {
-        let matchedTab = tabs[0];
-        if (sheetName) {
-          const foundByName = tabs.find(
-            (t) => t.name.toLowerCase().trim() === String(sheetName).toLowerCase().trim()
-          );
-          if (foundByName) matchedTab = foundByName;
-        } else if (effectiveGid !== undefined) {
-          const foundByGid = tabs.find((t) => t.gid === effectiveGid || t.id === effectiveGid || t.id === `tab-${effectiveGid}`);
-          if (foundByGid) matchedTab = foundByGid;
-        }
-
-        const activeCsv = matchedTab.csvContent || sheetsCsv[matchedTab.name] || '';
-        if (activeCsv && activeCsv.trim().length > 0) {
-          return res.json({
-            ok: true,
-            csv: activeCsv,
-            docTitle: title,
-            activeTab: matchedTab,
-            availableTabs: tabs,
-            sheetsCsv,
-          });
-        }
-      }
+    // 2. Identify the target tab to load
+    let matchedTab = tabs[0];
+    if (sheetName && sheetName !== 'Main Sheet' && sheetName !== 'Published Sheet') {
+      const foundByName = tabs.find(
+        (t) => t.name.toLowerCase().trim() === String(sheetName).toLowerCase().trim()
+      );
+      if (foundByName) matchedTab = foundByName;
+    } else if (effectiveGid !== undefined) {
+      const foundByGid = tabs.find(
+        (t) => t.gid === effectiveGid || t.id === effectiveGid || t.id === `tab-${effectiveGid}`
+      );
+      if (foundByGid) matchedTab = foundByGid;
     }
 
-    // 3. Fallback: Query Google visualization / export CSV endpoints
+    // 3. If CSV is already cached in memory (from XLSX export), return it immediately
+    const cachedCsv = matchedTab?.csvContent || (matchedTab ? sheetsCsv[matchedTab.name] : '') || '';
+    if (cachedCsv && cachedCsv.trim().length > 0) {
+      return res.json({
+        ok: true,
+        csv: cachedCsv,
+        docTitle: title,
+        activeTab: matchedTab,
+        availableTabs: tabs,
+        sheetsCsv,
+      });
+    }
+
+    // 4. Fetch CSV for the target tab
     const candidateUrls: string[] = [];
-    if (parsed.sheetId) {
-      const sheetId = parsed.sheetId;
-      if (sheetName) {
+    const targetGid = matchedTab?.gid || effectiveGid;
+    const targetTabName = matchedTab?.name || sheetName;
+
+    if (parsed.isPublished) {
+      candidateUrls.push(
+        `https://docs.google.com/spreadsheets/d/e/${targetId}/pub?output=csv&gid=${targetGid}`
+      );
+      if (parsed.cleanUrl.includes('/pubhtml')) {
+        candidateUrls.push(parsed.cleanUrl.replace('/pubhtml', `/pub?output=csv&gid=${targetGid}`));
+      }
+    } else {
+      if (targetTabName && targetTabName !== 'Main Sheet') {
         candidateUrls.push(
-          `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`
+          `https://docs.google.com/spreadsheets/d/${targetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(targetTabName)}`
         );
       }
-      candidateUrls.push(`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${effectiveGid}`);
-      candidateUrls.push(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${effectiveGid}`);
+      candidateUrls.push(
+        `https://docs.google.com/spreadsheets/d/${targetId}/gviz/tq?tqx=out:csv&gid=${targetGid}`
+      );
+      candidateUrls.push(
+        `https://docs.google.com/spreadsheets/d/${targetId}/export?format=csv&gid=${targetGid}`
+      );
     }
 
     for (const fetchUrl of candidateUrls) {
@@ -467,20 +612,26 @@ app.post('/api/fetch-google-sheet', async (req, res) => {
           const { isHtml, isLogin } = inspectHtmlContent(text);
 
           if (!isHtml && text.trim().length > 0) {
-            const activeTab = {
-              id: effectiveGid,
-              gid: effectiveGid,
-              name: sheetName || (effectiveGid === '0' ? 'Main Sheet' : `Tab ${effectiveGid}`),
+            const activeTab = matchedTab || {
+              id: targetGid,
+              gid: targetGid,
+              name: targetTabName || (targetGid === '0' ? 'Main Sheet' : `Tab ${targetGid}`),
               isDefault: true,
             };
+
+            // Cache fetched CSV
+            if (activeTab.name) {
+              sheetsCsv[activeTab.name] = text;
+            }
 
             return res.json({
               ok: true,
               csv: text,
               source: fetchUrl,
-              docTitle: 'Google Sheet',
+              docTitle: title,
               activeTab,
-              availableTabs: [activeTab],
+              availableTabs: tabs.length > 0 ? tabs : [activeTab],
+              sheetsCsv,
             });
           }
 
@@ -494,11 +645,10 @@ app.post('/api/fetch-google-sheet', async (req, res) => {
           }
         }
       } catch (e) {
-        console.warn('Candidate fetch attempt failed:', e);
+        console.warn('Fetch candidate URL failed:', e);
       }
     }
 
-    // If all failed, return clean JSON with status 200 to prevent proxy HTML replacements
     return res.status(200).json({
       ok: false,
       error:

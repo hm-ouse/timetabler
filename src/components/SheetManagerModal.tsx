@@ -96,8 +96,8 @@ async function fetchGoogleSheetCsvClient(
   sheetName?: string
 ): Promise<{ csv: string; source: string; isHtml: boolean; isLogin: boolean; error?: string }> {
   let cleanUrl = (url || '').trim().replace(/^["'<]+|["'>]+$/g, '');
-  const publishedMatch = cleanUrl.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
-  const standardMatch = cleanUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{15,})/);
+  const publishedMatch = cleanUrl.match(/\/d\/e\/([a-zA-Z0-9-_]+)/);
+  const standardMatch = cleanUrl.match(/\/d\/(?!e\/)([a-zA-Z0-9-_]{15,})/);
   const gidMatch = cleanUrl.match(/[#&?]gid=([0-9]+)/);
   const effectiveGid = targetGid || (gidMatch ? gidMatch[1] : '0');
 
@@ -305,10 +305,10 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
   };
 
   // Handle Google Sheet URL fetch via server endpoint or client-side fallback
-  const handleFetchGoogleSheet = async (e?: React.FormEvent, customGid?: string, customName?: string) => {
+  const handleFetchGoogleSheet = async (e?: React.FormEvent, customGid?: string, customName?: string): Promise<boolean> => {
     if (e) e.preventDefault();
     const cleanUrl = googleSheetUrl.trim();
-    if (!cleanUrl) return;
+    if (!cleanUrl) return false;
 
     setLoading(true);
     setErrorMsg(null);
@@ -316,6 +316,31 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
 
     const targetGid = customGid !== undefined ? customGid : selectedTabGid;
     const targetName = customName !== undefined ? customName : selectedTabName;
+
+    // Fast-path: If target tab is already cached in memory, import immediately
+    if (customGid === undefined && customName === undefined && targetName && googleSheetsMap[targetName]) {
+      const cachedCsv = googleSheetsMap[targetName];
+      if (cachedCsv && cachedCsv.trim().length > 0) {
+        setPastedText(cachedCsv);
+        const parsed = parseSheetContent(cachedCsv, scaleOverride, {
+          activeTabName: targetName,
+          activeTabGid: targetGid,
+          availableTabs,
+          sourceUrl: cleanUrl,
+          sourceType: 'google_sheet',
+        });
+        setPreviewResult(parsed);
+        onUpdateRatings(parsed.ratings, parsed, cachedCsv);
+        setLoading(false);
+        if (parsed.validRatingsCount > 0) {
+          setSuccessMsg(`Imported ratings from tab: "${targetName}" (${parsed.validRatingsCount} ratings)`);
+          return true;
+        } else {
+          setSuccessMsg(`Loaded tab "${targetName}" (${parsed.totalRows} rows).`);
+          return true;
+        }
+      }
+    }
 
     try {
       let csvContent = '';
@@ -404,7 +429,7 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
         if (parsed.validRatingsCount === 0) {
           setErrorMsg(parsed.error || parsed.warning || 'Could not detect ratings in sheet.');
           setPreviewResult(parsed);
-          return;
+          return false;
         }
       }
 
@@ -425,6 +450,7 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
           }`
         );
       }
+      return true;
     } catch (err: any) {
       const msg = err.message || '';
       if (
@@ -443,9 +469,37 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
             'Could not fetch Google Sheet. Please check that the sheet is shared with "Anyone with the link can view", or copy and paste the spreadsheet cells directly.'
         );
       }
+      return false;
     } finally {
       setLoading(false);
     }
+  };
+
+  // Save & Done handler: ensures current ratings are applied and closes the modal
+  const handleSaveAndDone = async () => {
+    // If ratings are already parsed and active, close immediately!
+    if (previewResult && previewResult.ratings && previewResult.ratings.length > 0) {
+      onClose();
+      return;
+    }
+
+    // If on Google Sheet tab with a URL entered but not fetched yet, fetch and close on success
+    if (activeTab === 'google_sheet' && googleSheetUrl.trim()) {
+      const ok = await handleFetchGoogleSheet();
+      if (ok) {
+        onClose();
+      }
+      return;
+    }
+
+    // If on paste tab with text but not parsed yet:
+    if (activeTab === 'paste' && pastedText.trim() && (!previewResult || previewResult.ratings.length === 0)) {
+      handleParsePastedText();
+      onClose();
+      return;
+    }
+
+    onClose();
   };
 
   // Inspect Google Sheet Tabs without downloading full content
@@ -753,7 +807,13 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
           {/* Tab: Google Sheet URL */}
           {activeTab === 'google_sheet' && (
             <div className="space-y-4">
-              <form onSubmit={(e) => handleFetchGoogleSheet(e)} className="space-y-3">
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await handleSaveAndDone();
+                }}
+                className="space-y-3"
+              >
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
@@ -775,75 +835,108 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
                       className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono text-xs"
                     />
                     <button
-                      id="btn-fetch-google-sheet"
-                      type="submit"
-                      disabled={loading}
-                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition shrink-0"
-                    >
-                      {loading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                      <span>{loading ? 'Fetching...' : 'Import Tab'}</span>
-                    </button>
-                    <button
                       id="btn-discover-tabs"
                       type="button"
                       onClick={handleDiscoverGoogleSheetTabs}
                       disabled={loading || !googleSheetUrl.trim()}
-                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 rounded-xl text-xs font-medium flex items-center gap-1.5 transition shrink-0"
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 rounded-xl text-xs font-medium flex items-center gap-1.5 transition shrink-0"
                       title="Inspect spreadsheet tabs"
                     >
-                      <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                      {loading && availableTabs.length === 0 ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      ) : (
+                        <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                      )}
                       <span>Find All Tabs</span>
                     </button>
                   </div>
                 </div>
-              </form>
 
-              {/* Tab Selector when Google Sheet has tabs */}
-              {availableTabs.length > 0 && (
-                <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs font-bold text-white uppercase tracking-wider">
-                        Select Person / Tab from Google Sheet ({availableTabs.length} tabs found)
-                      </span>
+                {/* Tab Selector when Google Sheet has tabs */}
+                {availableTabs.length > 0 && (
+                  <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-emerald-400" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          Select Person / Tab from Google Sheet ({availableTabs.length} tabs found)
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400">Click any tab to select its ratings</span>
                     </div>
-                    <span className="text-[11px] text-slate-400">Click any tab to load its ratings</span>
-                  </div>
 
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {availableTabs.map((tab) => {
-                      const isSelected =
-                        selectedTabGid === tab.gid ||
-                        selectedTabName.toLowerCase() === tab.name.toLowerCase();
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {availableTabs.map((tab) => {
+                        const isSelected =
+                          selectedTabGid === tab.gid ||
+                          selectedTabName.toLowerCase() === tab.name.toLowerCase();
 
-                      return (
-                        <button
-                          key={tab.id || tab.gid || tab.name}
-                          id={`btn-select-tab-${tab.gid || tab.name}`}
-                          type="button"
-                          disabled={loading}
-                          onClick={() => handleSelectGoogleTab(tab)}
-                          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
-                            isSelected
-                              ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
-                              : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'
-                          }`}
-                        >
-                          {tab.name.toLowerCase().includes('aggregate') || tab.name.toLowerCase().includes('average') || tab.name.toLowerCase().includes('total') ? (
-                            <Users className="w-3.5 h-3.5 text-amber-300" />
-                          ) : (
-                            <User className="w-3.5 h-3.5 text-emerald-400" />
-                          )}
-                          <span>{tab.name}</span>
-                          {tab.gid && <span className="text-[10px] opacity-60 font-mono">#{tab.gid}</span>}
-                          {isSelected && <CheckCircle className="w-3.5 h-3.5 text-emerald-400 ml-1" />}
-                        </button>
-                      );
-                    })}
+                        return (
+                          <button
+                            key={tab.id || tab.gid || tab.name}
+                            id={`btn-select-tab-${tab.gid || tab.name}`}
+                            type="button"
+                            disabled={loading}
+                            onClick={() => handleSelectGoogleTab(tab)}
+                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+                              isSelected
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
+                                : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'
+                            }`}
+                          >
+                            {tab.name.toLowerCase().includes('aggregate') || tab.name.toLowerCase().includes('average') || tab.name.toLowerCase().includes('total') ? (
+                              <Users className="w-3.5 h-3.5 text-amber-300" />
+                            ) : (
+                              <User className="w-3.5 h-3.5 text-emerald-400" />
+                            )}
+                            <span>{tab.name}</span>
+                            {tab.gid && <span className="text-[10px] opacity-60 font-mono">#{tab.gid}</span>}
+                            {isSelected && <CheckCircle className="w-3.5 h-3.5 text-emerald-400 ml-1" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Moved lower: underneath where the located tabs are listed */}
+                    <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                      <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                        <span>Selected tab:</span>
+                        <span className="text-emerald-300 font-semibold">
+                          {selectedTabName || (availableTabs[0] ? availableTabs[0].name : 'Main Sheet')}
+                        </span>
+                      </div>
+                      <button
+                        id="btn-save-and-done-google"
+                        type="button"
+                        onClick={handleSaveAndDone}
+                        disabled={loading}
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition shrink-0 shadow-sm"
+                      >
+                        {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        <span>{loading ? 'Saving...' : 'Save & Done'}</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+
+                {/* If tabs haven't been located yet, show Save & Done directly beneath */}
+                {availableTabs.length === 0 && (
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-slate-400">
+                      Click &ldquo;Find All Tabs&rdquo; to locate all sheets, or save ratings directly:
+                    </span>
+                    <button
+                      id="btn-save-and-done-google-direct"
+                      type="submit"
+                      disabled={loading || !googleSheetUrl.trim()}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition shrink-0 shadow-sm"
+                    >
+                      {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                      <span>{loading ? 'Saving...' : 'Save & Done'}</span>
+                    </button>
+                  </div>
+                )}
+              </form>
 
               <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700 text-xs text-slate-400 flex items-start gap-2">
                 <HelpCircle className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
@@ -910,6 +1003,29 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
                         </button>
                       );
                     })}
+                  </div>
+
+                  {/* Moved lower: underneath where the located tabs are listed */}
+                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                    <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                      <span>Selected tab:</span>
+                      <span className="text-emerald-300 font-semibold">
+                        {selectedTabName || (availableTabs[0] ? availableTabs[0].name : 'Main Sheet')}
+                      </span>
+                    </div>
+                    <button
+                      id="btn-save-and-done-excel"
+                      type="button"
+                      onClick={() => {
+                        const tab = availableTabs.find((t) => t.name === selectedTabName) || availableTabs[0];
+                        if (tab) handleSelectWorkbookTab(tab);
+                        onClose();
+                      }}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition shrink-0 shadow-sm"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Save & Done</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -1030,10 +1146,11 @@ export const SheetManagerModal: React.FC<SheetManagerModalProps> = ({
           <button
             id="btn-apply-ratings"
             type="button"
-            onClick={onClose}
-            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition shadow-sm"
+            onClick={handleSaveAndDone}
+            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 transition shadow-sm"
           >
-            Apply & Done
+            <CheckCircle className="w-4 h-4" />
+            <span>Save & Done</span>
           </button>
         </div>
       </div>
